@@ -597,6 +597,9 @@ def offset_internal_line(
 ) -> dict:
     """Create internal lines parallel to an outline line (e.g. hem fold or pleat lines).
 
+    The offset must fit inside the piece; if CLO creates nothing, the tool returns an error
+    (try reverse=True, a smaller distance, or a longer line).
+
     Args:
         pattern_index: Pattern to draw on.
         line_index: Outline line to offset from.
@@ -697,7 +700,13 @@ def set_elastic(
 
 @mcp.tool()
 def set_shrinkage(pattern_index: int, width_percent: float | None = None, height_percent: float | None = None) -> dict:
-    """Set a piece's fabric shrinkage percentages in width (weft) and/or height (warp)."""
+    """Set a piece's fabric shrinkage as its size in percent: 100 = no shrinkage, 97 = shrinks 3 %.
+
+    Args:
+        pattern_index: Pattern to change.
+        width_percent: Width (weft) size in percent, 50-150.
+        height_percent: Height (warp) size in percent, 50-150.
+    """
     return _send("set_shrinkage", _given(
         pattern_index=pattern_index, width_percent=width_percent, height_percent=height_percent))
 

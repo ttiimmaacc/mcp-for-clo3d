@@ -202,6 +202,23 @@ int LineIndex(const Value& p, int pattern, const char* key = "line_index", bool 
 	return line;
 }
 
+// Number of internal shapes (children) of a pattern: a child exists while its line 0 has length.
+int ChildCount(int pattern)
+{
+	int n = 0;
+	while (n < 2000 && PATTERN_API->GetLineLength(pattern, n, 0) > 0.0f)
+		++n;
+	return n;
+}
+
+int RequireCreated(int pattern, int before, const char* hint)
+{
+	int created = ChildCount(pattern) - before;
+	if (created <= 0)
+		throw std::runtime_error(std::string("CLO did not create any internal line; ") + hint);
+	return created;
+}
+
 std::vector<std::tuple<float, float, int>> Points(const Value& p)
 {
 	const Value* pts = p.find("points");
@@ -653,13 +670,16 @@ std::map<std::string, Handler> BuildHandlers()
 	};
 	h["get_pattern_state"] = [](const Value& p) {
 		int pattern = PatternIndex(p);
-		return Value::object()
+		bool solidified = PATTERN_API->IsPatternPieceSolidify(pattern);
+		Value r = Value::object()
 			.set("pattern_index", pattern)
+			.set("position_2d", Value::from(PATTERN_API->GetPatternPiecePos(pattern)))
 			.set("layer", PATTERN_API->GetPatternLayer(pattern))
-			.set("solidified", PATTERN_API->IsPatternPieceSolidify(pattern))
-			.set("solidify_strength", PATTERN_API->GetPatternPieceSolidifyStrengthen(pattern))
-			.set("grain_degrees", PATTERN_API->GetPatternPieceGrainDirection(pattern))
-			.set("shrinkage", Value::from(PATTERN_API->GetShrinkagePercentage(pattern)))
+			.set("solidified", solidified);
+		if (solidified) // CLO returns an uninitialised value otherwise
+			r.set("solidify_strength", PATTERN_API->GetPatternPieceSolidifyStrengthen(pattern));
+		return r.set("grain_degrees", PATTERN_API->GetPatternPieceGrainDirection(pattern))
+			.set("shrinkage_percent", Value::from(PATTERN_API->GetShrinkagePercentage(pattern)))
 			.set("arrangement", Value::from(PATTERN_API->GetArrangementOfPattern(pattern)));
 	};
 	h["remove_all_pins"] = [](const Value&) {
@@ -721,21 +741,28 @@ std::map<std::string, Handler> BuildHandlers()
 			PATTERN_API->SetPatternPiecePos(pattern, (float)p.num("x", 0), (float)p.num("y", 0));
 		else
 			PATTERN_API->SetPatternPieceMove(pattern, (float)p.num("dx", 0), (float)p.num("dy", 0));
-		return Value::object().set("pattern_index", pattern).set("bounding_box", Value::from(PATTERN_API->GetBoundingBoxOfPattern(pattern)));
+		return Value::object().set("pattern_index", pattern).set("position_2d", Value::from(PATTERN_API->GetPatternPiecePos(pattern)));
 	};
 
 	// -- Lines and shapes --
+	// CLO silently creates nothing for impossible requests (e.g. an offset longer than the
+	// line), so these report how many internal shapes actually appeared.
 	h["add_internal_shape"] = [](const Value& p) {
 		int pattern = PatternIndex(p);
 		auto points = Points(p);
-		int result = PATTERN_API->CreateInternalShapeWithPoints(pattern, points, p.boolean("closed", false));
-		return Value::object().set("pattern_index", pattern).set("point_count", (int)points.size()).set("result", result);
+		int before = ChildCount(pattern);
+		PATTERN_API->CreateInternalShapeWithPoints(pattern, points, p.boolean("closed", false));
+		return Value::object().set("pattern_index", pattern).set("point_count", (int)points.size())
+			.set("internal_shapes_created", RequireCreated(pattern, before, "the points must lie inside the piece"));
 	};
 	h["offset_internal_line"] = [](const Value& p) {
 		int pattern = PatternIndex(p), line = LineIndex(p, pattern);
+		int before = ChildCount(pattern);
 		PATTERN_API->OffsetAsInternalLine(pattern, line, I(p, "count", 1), (float)p.num("distance"),
 										  p.boolean("reverse", false), p.boolean("extend", false));
-		return Value::object().set("pattern_index", pattern).set("line_index", line).set("created", true);
+		return Value::object().set("pattern_index", pattern).set("line_index", line)
+			.set("internal_shapes_created", RequireCreated(pattern, before,
+				"try reverse=true, a smaller distance, or a longer line (the offset must fit inside the piece)"));
 	};
 	h["distribute_internal_lines"] = [](const Value& p) {
 		int pattern = PatternIndex(p);
@@ -751,9 +778,11 @@ std::map<std::string, Handler> BuildHandlers()
 				throw std::runtime_error("line index " + std::to_string(line) + " is out of range");
 			indices.push_back(line);
 		}
+		int before = ChildCount(pattern);
 		PATTERN_API->DistribueInternalLinesbetweenSegments(pattern, indices, I(p, "count"), p.boolean("straight", true),
 														   p.boolean("perpendicular", false), p.boolean("graduate", false));
-		return Value::object().set("pattern_index", pattern).set("created", true);
+		return Value::object().set("pattern_index", pattern)
+			.set("internal_shapes_created", RequireCreated(pattern, before, "check that the lines face each other"));
 	};
 	h["convert_shape"] = [](const Value& p) {
 		int pattern = PatternIndex(p), child = I(p, "internal_shape");
@@ -810,11 +839,15 @@ std::map<std::string, Handler> BuildHandlers()
 			throw std::runtime_error("nothing to set; pass enabled, strength, ratio, segment_length or total_length");
 		return r;
 	};
+	// CLO's shrinkage is the piece's size in percent: 100 = unchanged, 97 = shrinks 3 %.
 	h["set_shrinkage"] = [](const Value& p) {
 		int pattern = PatternIndex(p);
+		for (const char* key : {"width_percent", "height_percent"})
+			if (p.has(key) && (p.num(key) < 50.0 || p.num(key) > 150.0))
+				throw std::runtime_error(std::string(key) + " must be between 50 and 150 (100 = no shrinkage, 97 = 3 % shrinkage)");
 		if (p.has("width_percent")) PATTERN_API->SetWidthShrinkagePercentage(pattern, (float)p.num("width_percent"));
 		if (p.has("height_percent")) PATTERN_API->SetHeightShrinkagePercentage(pattern, (float)p.num("height_percent"));
-		return Value::object().set("pattern_index", pattern).set("shrinkage", Value::from(PATTERN_API->GetShrinkagePercentage(pattern)));
+		return Value::object().set("pattern_index", pattern).set("shrinkage_percent", Value::from(PATTERN_API->GetShrinkagePercentage(pattern)));
 	};
 
 	return h;
