@@ -71,7 +71,8 @@ jobs:
           New-Item -ItemType Directory release | Out-Null
           Copy-Item cpp_plugin\dist\CloMcpPlugin.dll release\
           $hash = (Get-FileHash release\CloMcpPlugin.dll -Algorithm SHA256).Hash.ToLower()
-          "$hash  CloMcpPlugin.dll" | Out-File -Encoding ascii release\CloMcpPlugin.dll.sha256
+          # LF line ending so `sha256sum -c` works on any platform
+          [IO.File]::WriteAllText("$PWDelease\CloMcpPlugin.dll.sha256", "$hash  CloMcpPlugin.dll`n")
           Get-Content release\CloMcpPlugin.dll.sha256
 
       - uses: actions/upload-artifact@v4
@@ -104,7 +105,7 @@ jobs:
           CLO MCP Listener** stops or starts it. Then connect your MCP client as described in the
           README.
 
-          Built from ${GITHUB_SHA} by GitHub Actions against CLO SDK v${CLO_VERSION} (SHA-256
+          Built from ${GITHUB_SHA} by GitHub Actions against CLO's SDK for ${CLO_VERSION} (SDK zip SHA-256
           \`${CLO_SDK_SHA256}\`). SHA-256 of the DLL: \`$(cut -d' ' -f1 release/CloMcpPlugin.dll.sha256)\`.
           EOF
           gh release create "$GITHUB_REF_NAME" release/CloMcpPlugin.dll release/CloMcpPlugin.dll.sha256 \
