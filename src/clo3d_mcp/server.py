@@ -114,11 +114,12 @@ def view_patterns(pattern_index: int | None = None) -> list:
 
 @mcp.tool()
 def make_rod_pocket(
-    pattern_index: int,
+    pattern_index: int | list[int],
     pocket_depth: float = 150.0,
     rod_diameter: float = 30.0,
     rod_overhang: float = 200.0,
     settle_steps: int = 150,
+    pocket_side: str = "front",
 ) -> dict:
     """Make a rod pocket along a panel's top edge and hang the panel on a rod (curtains,
     banners, flags). The panel needs a straight, horizontal top edge.
@@ -130,11 +131,15 @@ def make_rod_pocket(
     with capture_3d. Save a checkpoint first.
 
     Args:
-        pattern_index: The panel.
+        pattern_index: The panel, or a list of panels sharing one rod (e.g. the two halves of a
+            noren); their top edges must be at the same height.
         pocket_depth: Height of the pocket strip in mm (the tube is roughly 1.4x this around).
         rod_diameter: Rod diameter in mm.
         rod_overhang: How far the rod extends past each side of the panel, in mm.
         settle_steps: Simulation steps after releasing the panel.
+        pocket_side: Only "front" (+z, towards the front camera) forms reliably in CLO 2025.2.
+            For a curtain whose pocket belongs on the back, build it facing the "back" camera
+            (decorative patches on layer -1). Keep patches on the pocket side below fold_y.
     """
     from clo3d_mcp.rod_pocket import make_rod_pocket as build
 
@@ -143,15 +148,20 @@ def make_rod_pocket(
             return add_rod(params["center"], params["length"], params["diameter"], "x")
         if command == "__remove_object__":
             return remove_collision_object(params["index"])
+        if command == "__pattern_bounds__":
+            return get_cloth_bounds(params.get("min"), params.get("max"), params["pattern_index"])
         return _send(command, params)
 
-    return build(send, pattern_index, pocket_depth, rod_diameter, rod_overhang, settle_steps)
+    return build(send, pattern_index, pocket_depth, rod_diameter, rod_overhang, settle_steps,
+                 pocket_side=pocket_side)
 
 
 @mcp.tool()
-def get_cloth_bounds(region_min: list[float] | None = None, region_max: list[float] | None = None) -> dict:
-    """3D bounding box (mm) of all cloth: min/max [x, y, z]. CLO's 3D axes: Y is up, Z points
-    towards the front view camera, X to the avatar's left. Use it to place rods and props.
+def get_cloth_bounds(region_min: list[float] | None = None, region_max: list[float] | None = None,
+                     pattern_index: int | None = None) -> dict:
+    """3D bounding box (mm) of the cloth: min/max [x, y, z]. CLO's 3D axes: Y is up, Z points
+    towards the front view camera, X to the avatar's left. Use it to place rods and props and
+    to check where a piece ended up (e.g. is this panel still on the rod?).
 
     CLO only reports cloth once it has been simulated, and reports nothing while every piece
     is frozen: run simulate(1) with at least one piece unfrozen first. A flat new piece lies
@@ -160,8 +170,20 @@ def get_cloth_bounds(region_min: list[float] | None = None, region_max: list[flo
     Args:
         region_min: Only count vertices inside this box: [x, y, z] lower corner.
         region_max: Upper corner [x, y, z] of that box.
+        pattern_index: Only this pattern's vertices.
     """
-    return _send("get_cloth_bounds", _given(min=region_min, max=region_max))
+    params = _given(min=region_min, max=region_max)
+    if pattern_index is not None:
+        params["vertex_range"] = list(_pattern_vertex_range(pattern_index))
+    return _send("get_cloth_bounds", params)
+
+
+def _pattern_vertex_range(pattern_index: int):
+    from clo3d_mcp.cloth_layout import vertex_ranges
+    ranges = vertex_ranges(_send("get_mesh_counts"))
+    if not 0 <= pattern_index < len(ranges):
+        raise ValueError("no pattern %d" % pattern_index)
+    return ranges[pattern_index]
 
 
 # CLO keeps one avatar: importing an OBJ as an avatar replaces the previous one (verified in

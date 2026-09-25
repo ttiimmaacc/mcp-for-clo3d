@@ -531,6 +531,16 @@ std::map<std::string, Handler> BuildHandlers()
 		return Value::object().set("imported", ok).set("file_path", path).set("object_type", type)
 			.set("avatar_count_before", before).set("avatar_count", EXPORT_API->GetAvatarCount());
 	};
+	// Per-pattern mesh counts as CLO reports them (raw strings), plus the total cloth vertex
+	// count, so the server can check whether GetClothPositions lists patterns in order.
+	h["get_mesh_counts"] = [](const Value&) {
+		Value list = Value::array();
+		for (int i = 0, n = PATTERN_API->GetPatternCount(); i < n; ++i)
+			list.a.push_back(Value::from(PATTERN_API->GetMeshCountByType(i)));
+		std::vector<float> positions;
+		UTILITY_API->GetClothPositions(positions);
+		return Value::object().set("patterns", list).set("total_vertices", (double)(positions.size() / 3));
+	};
 	// Remove collision objects / avatars by index (e.g. a temporary guide rod).
 	h["delete_objects"] = [](const Value& p) {
 		const Value* list = p.find("indices");
@@ -565,8 +575,19 @@ std::map<std::string, Handler> BuildHandlers()
 		std::vector<float> positions;
 		UTILITY_API->GetClothPositions(positions);
 		size_t total = positions.size() / 3, n = 0;
+		// optional [first, count] slice of the vertex list (the server maps patterns to slices)
+		size_t first = 0, last = total;
+		const Value* range = p.find("vertex_range");
+		if (range && range->type == Value::Array && range->a.size() == 2)
+		{
+			first = (size_t)range->a[0].n;
+			last = first + (size_t)range->a[1].n;
+			if (last > total)
+				throw std::runtime_error("vertex_range ends at " + std::to_string(last) + " but CLO reports " +
+										 std::to_string(total) + " cloth vertices");
+		}
 		float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
-		for (size_t i = 0; i < total; ++i)
+		for (size_t i = first; i < last; ++i)
 		{
 			const float* v = &positions[i * 3];
 			if (v[0] < rmin[0] || v[0] > rmax[0] || v[1] < rmin[1] || v[1] > rmax[1] || v[2] < rmin[2] || v[2] > rmax[2])

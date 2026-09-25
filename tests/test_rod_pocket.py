@@ -22,11 +22,36 @@ def test_top_edge_requires_straight_horizontal_line():
         find_top_edge({"lines": [_line(0, (0, 0), (0, 100))]})
 
 
-def test_rod_in_front_of_the_strip_above_the_top_edge():
-    rod_y, rod_z = placements(top_y=1500, fold_y=1440, plane_z=200, pocket_depth=150, rod_diameter=30)
-    assert rod_y == 1525 and rod_z == 218
+def test_rod_above_the_top_edge_on_the_pocket_side():
+    back = placements(top_y=1500, fold_y=1440, plane_z=200, pocket_depth=150, rod_diameter=30)
+    front = placements(top_y=1500, fold_y=1440, plane_z=200, pocket_depth=150, rod_diameter=30, side=1)
+    assert back == (1525, 182) and front == (1525, 218)
 
 
 def test_pocket_too_small_is_rejected_with_a_suggestion():
     with pytest.raises(ValueError, match="pocket_depth >="):
         placements(top_y=1500, fold_y=1460, plane_z=200, pocket_depth=60, rod_diameter=40)
+
+
+def test_retry_placements_move_the_rod():
+    first = placements(1500, 1440, 200, 150, 30, side=1, gap=3.0, lift=10.0)
+    second = placements(1500, 1440, 200, 150, 30, side=1, gap=6.0, lift=16.0)
+    assert first == (1525, 218) and second == (1531, 221)
+
+
+def test_assemblies_follow_seams_but_not_across_panels():
+    from clo3d_mcp.rod_pocket import assemblies
+    seams = [{"sides": [{"pattern_index": 0}, {"pattern_index": 1}]},      # body L - band L
+             {"sides": [{"pattern_index": 1}, {"pattern_index": 2}]},      # band L - strip L
+             {"sides": [{"pattern_index": 6}, {"pattern_index": 0, "internal_shape": 3}]},  # patch on body L
+             {"sides": [{"pattern_index": 3}, {"pattern_index": 4}]}]      # body R - band R
+    assert assemblies({"seams": seams}, [0, 3]) == [[0, 1, 2, 6], [3, 4]]
+
+
+def test_wrap_needs_cloth_over_the_rod_and_round_its_far_side():
+    from clo3d_mcp.rod_pocket import wrapped
+    over_and_round = {"vertex_count": 40, "min": [0, 1990, 200], "max": [0, 2048, 236]}
+    only_over = {"vertex_count": 40, "min": [0, 1990, 200], "max": [0, 2048, 215]}
+    assert wrapped(over_and_round, rod_y=2030, rod_z=219, radius=16, side=1)
+    assert not wrapped(only_over, rod_y=2030, rod_z=219, radius=16, side=1)
+    assert not wrapped({"vertex_count": 0}, rod_y=2030, rod_z=219, radius=16, side=1)
