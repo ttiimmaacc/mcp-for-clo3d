@@ -65,11 +65,13 @@ CLO's SDK files can't be redistributed, so you download the SDK yourself.
 `C:\Users\Public\Documents\CLO\Plugins\CloLibraryAPI_Plugin.dll`, which CLO loads at startup,
 so the listener runs as soon as CLO opens. `install_autostart.bat /remove` undoes it.
 
-**Or: menu item.** **Plugins → Plug-in Manager → + ADD**, choose `CloMcpPlugin.dll`, name it,
-**OK**. CLO adds **Plugins → Plug-in → CLO MCP Listener (start/stop)**, but it only loads a
-Plug-in Manager plug-in when you click its menu item. Without autostart, click it once per CLO
-session. With autostart, the item turns the same listener off and on, and a message box shows the
-new state.
+Autostart also adds **Plugins → Plug-in → CLO MCP Listener (start/stop)**, which turns the
+listener off and on and shows a message box with the new state.
+
+**Or: without autostart.** **Plugins → Plug-in Manager → + ADD**, choose `CloMcpPlugin.dll`, name
+it, **OK**. CLO only loads a Plug-in Manager plug-in when you click its menu item, so click
+**Plugins → Plug-in → <your name>** once per CLO session. Use one method or the other: with both,
+CLO lists the listener several times (the entries all control the same listener).
 
 To check that it is running, open `%TEMP%\clo3d_mcp\status.json`. It should show
 `"state": "listening"` and a `ticks` count that keeps rising.
