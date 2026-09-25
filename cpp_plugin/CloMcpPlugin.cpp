@@ -1030,14 +1030,17 @@ void StopListener(const char* reason)
 // ---------------------------------------------------------------------------
 // CLO plug-in entry points
 
+// Loaded at startup as CloLibraryAPI_Plugin.dll (autostart). It only starts the listener and
+// registers no menu action: when it did, CLO added its action to the Plug-in menu next to the
+// Plug-in Manager entry and listed the listener three times. The menu toggle comes from the
+// Plug-in Manager registration (the exported DoFunction below).
 class CloMcpPlugin : public CLOAPI::LibraryWindowInterface
 {
 public:
-	bool IsPluginEnabled() override { return true; }
+	bool IsPluginEnabled() override { return false; }
 
 	void DoFunctionStartUp() override { StartListener(); }
 
-	// Plugins > Plug-in > "CLO MCP Listener (start/stop)"
 	void DoFunction() override
 	{
 		if (HWND running = FindListener())
@@ -1050,10 +1053,6 @@ public:
 		else
 			UTILITY_API->DisplayMessageBox("CLO MCP listener failed to start: " + g_lastError);
 	}
-
-	const char* GetActionName() override { return "CLO MCP Listener (start/stop)"; }
-	const char* GetObjectNameTreeToAddAction() override { return "menuPlugins / menuPlug_In"; }
-	int GetPositionIndexToAddAction() override { return 1; }
 };
 } // namespace
 

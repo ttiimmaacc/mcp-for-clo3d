@@ -28,8 +28,10 @@ int main(int argc, char** argv) {
 	if (!dll) { printf("LoadLibrary failed %lu\n", GetLastError()); return 1; }
 	auto create = (CLOAPI::LibraryWindowInterface* (*)())GetProcAddress(dll, "Create");
 	CLOAPI::LibraryWindowInterface* plugin = create();
-	printf("plugin loaded: enabled=%d action='%s' menu='%s'\n", plugin->IsPluginEnabled(),
-		   plugin->GetActionName(), plugin->GetObjectNameTreeToAddAction());
+	// The autostart (library) entry point must not register a menu action: CLO would list the
+	// listener again next to the Plug-in Manager entry.
+	printf("plugin loaded: menu action enabled=%d, action name=%s\n", plugin->IsPluginEnabled(),
+		   plugin->GetActionName() ? plugin->GetActionName() : "(none)");
 	fflush(stdout);
 
 	unsigned long long loops = 0; DWORD worst = 0, last = GetTickCount();
