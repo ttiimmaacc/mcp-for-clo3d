@@ -121,6 +121,9 @@ def _checkpoint_path(name: str) -> str:
 def save_checkpoint(name: str = "checkpoint") -> dict:
     """Save the whole scene so it can be restored later. CLO's API has no undo, so save one
     before risky edits (sewing, deleting lines, simulating). Reusing a name overwrites it.
+
+    CLO saves the checkpoint like "Save As", so its open file becomes the checkpoint copy.
+    The result's original_path is the real file: save there with save_project when done.
     """
     before = _send("get_project_info")
     path = _checkpoint_path(name)
@@ -131,10 +134,19 @@ def save_checkpoint(name: str = "checkpoint") -> dict:
     with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)
     out = {"saved": result.get("saved", False), "checkpoint": name, "file": meta["file"]}
-    if after.get("project_path") != before.get("project_path"):
-        out["note"] = ("CLO now treats the checkpoint as the open project; save your work with "
-                       "save_project(%r) when done." % before.get("project_path"))
+    if _same_path(after.get("project_path"), meta["file"]) and not _same_path(before.get("project_path"), meta["file"]):
+        # CLO's ExportZPrj acts like "Save As": the open project is now the checkpoint copy.
+        out["note"] = ("CLO's open file is now the checkpoint copy, so CLO's own Save would write "
+                       "there. When finished, save the work with save_project(%r)."
+                       % before.get("project_path"))
+        out["original_path"] = before.get("project_path")
     return out
+
+
+def _same_path(a, b) -> bool:
+    if not a or not b:
+        return False
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
 
 
 @mcp.tool()
