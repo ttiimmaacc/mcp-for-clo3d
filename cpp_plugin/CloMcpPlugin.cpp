@@ -103,10 +103,12 @@ std::string Narrow(const std::wstring& w)
 	return s;
 }
 
-void WriteStatus(const char* state)
+void WriteStatus(const char* state, const Value& extra = Value())
 {
 	Value s = Value::object();
 	s.set("state", state);
+	for (const auto& kv : extra.o)
+		s.set(kv.first, kv.second);
 	s.set("implementation", "native");
 	s.set("pid", (double)GetCurrentProcessId());
 	s.set("thread", (double)GetCurrentThreadId());
@@ -459,10 +461,15 @@ std::map<std::string, Handler> BuildHandlers()
 		std::string path = p.str("file_path");
 		return Value::object().set("imported", IMPORT_API->ImportFile(path)).set("file_path", path);
 	};
+	// .avac goes through ImportAVAC; everything else (.avt, ...) through the generic importer,
+	// which is what loads an avatar with its arrangement points (verified with CLO's .avt files).
 	h["import_avatar"] = [](const Value& p) {
 		std::string path = p.str("file_path");
-		std::string apf = p.str("apf_path", "");
-		return Value::object().set("imported", IMPORT_API->ImportAVAC(path, apf)).set("file_path", path);
+		std::string ext = path.size() > 5 ? path.substr(path.size() - 5) : path;
+		for (char& ch : ext)
+			ch = (char)tolower((unsigned char)ch);
+		bool ok = ext == ".avac" ? IMPORT_API->ImportAVAC(path, p.str("apf_path", "")) : IMPORT_API->ImportFile(path);
+		return Value::object().set("imported", ok).set("file_path", path).set("avatar_count", EXPORT_API->GetAvatarCount());
 	};
 	h["import_fabric"] = [](const Value& p) {
 		std::string path = p.str("file_path");
@@ -764,26 +771,6 @@ std::map<std::string, Handler> BuildHandlers()
 			.set("internal_shapes_created", RequireCreated(pattern, before,
 				"try reverse=true, a smaller distance, or a longer line (the offset must fit inside the piece)"));
 	};
-	h["distribute_internal_lines"] = [](const Value& p) {
-		int pattern = PatternIndex(p);
-		const Value* lines = p.find("line_indices");
-		if (!lines || lines->type != Value::Array || lines->a.size() < 2)
-			throw std::runtime_error("'line_indices' must list at least two outline lines to distribute between");
-		std::vector<int> indices;
-		int count = LineCount(pattern);
-		for (const Value& v : lines->a)
-		{
-			int line = (int)v.n;
-			if (line < 0 || line >= count)
-				throw std::runtime_error("line index " + std::to_string(line) + " is out of range");
-			indices.push_back(line);
-		}
-		int before = ChildCount(pattern);
-		PATTERN_API->DistribueInternalLinesbetweenSegments(pattern, indices, I(p, "count"), p.boolean("straight", true),
-														   p.boolean("perpendicular", false), p.boolean("graduate", false));
-		return Value::object().set("pattern_index", pattern)
-			.set("internal_shapes_created", RequireCreated(pattern, before, "check that the lines face each other"));
-	};
 	h["convert_shape"] = [](const Value& p) {
 		int pattern = PatternIndex(p), child = I(p, "internal_shape");
 		std::string to = p.str("to");
@@ -794,13 +781,6 @@ std::map<std::string, Handler> BuildHandlers()
 		else
 			throw std::runtime_error("'to' must be \"internal\" or \"base\"");
 		return Value::object().set("pattern_index", pattern).set("internal_shape", child).set("converted_to", to);
-	};
-	h["move_point"] = [](const Value& p) {
-		int pattern = PatternIndex(p), point = I(p, "point_index");
-		if (point < 0 || point >= LineCount(pattern))
-			throw std::runtime_error("point_index is out of range");
-		PATTERN_API->MovePatternPoint(pattern, point, (float)p.num("x"), (float)p.num("y"));
-		return Value::object().set("pattern_index", pattern).set("point_index", point).set("moved", true);
 	};
 	h["delete_point"] = [](const Value& p) {
 		int pattern = PatternIndex(p), point = I(p, "point_index");
@@ -922,10 +902,28 @@ void ServeOnce()
 	if (data.find_first_not_of(" \r\n\t") == std::string::npos)
 		return;
 
+	// Tell the client which request is running, so it keeps waiting through long simulations
+	// instead of timing out (and never re-sends a request that is still executing).
+	Value busy = Value::object();
+	try
+	{
+		Value request = mj::parse(data);
+		if (const Value* id = request.find("id"))
+			busy.set("request_id", *id);
+		busy.set("command", request.str("type", ""));
+	}
+	catch (...)
+	{
+	}
+	busy.set("started", (double)time(nullptr));
+	WriteStatus("busy", busy);
+
 	std::string response = RunCommand(data);
 	if (!WriteAtomic(CommFile(L"response.json"), response))
 		g_lastError = "could not write response.json";
 	++g_handled;
+	WriteStatus("listening");
+	g_lastStatus = GetTickCount();
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)

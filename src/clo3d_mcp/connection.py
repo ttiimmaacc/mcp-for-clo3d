@@ -14,14 +14,27 @@ import os
 import time
 import uuid
 
-TIMEOUT = 180  # seconds: simulation/export can take minutes
+TIMEOUT = 180  # seconds to wait for a reply while CLO is not reporting work on this request
+MAX_BUSY = 3600  # seconds to keep waiting while CLO reports it is still running this request
 POLL_INTERVAL = 0.05  # seconds between file checks
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0
 
 
 class CLO3DConnectionError(Exception):
-    pass
+    """Base class for all errors talking to CLO3D."""
+
+
+class CLO3DNotRunningError(CLO3DConnectionError):
+    """The request could not be delivered (nothing was sent), so it is safe to retry."""
+
+
+class CLO3DCommandError(CLO3DConnectionError):
+    """CLO ran the command and reported an error."""
+
+
+class CLO3DTimeoutError(CLO3DConnectionError):
+    """No reply in time. The command may still run or have run, so it is never re-sent."""
 
 
 def _find_comm_dir():
@@ -115,20 +128,31 @@ class CLO3DConnection:
             "params": params or {},
         }
 
+        # Only retry when nothing was delivered. Re-sending after a timeout or an error reply
+        # could run a command twice (e.g. a second simulation after a slow first one).
         for attempt in range(retries):
             try:
                 return self._do_send(request)
-            except CLO3DConnectionError:
+            except CLO3DNotRunningError:
                 if attempt < retries - 1:
                     time.sleep(RETRY_DELAY)
                     continue
                 raise
 
+    def _busy_with(self, request_id):
+        """True while the plug-in reports it is still executing this request."""
+        try:
+            with open(os.path.join(self.comm_dir, "status.json"), "r") as f:
+                status = json.load(f)
+        except (OSError, ValueError):
+            return False
+        return status.get("state") == "busy" and status.get("request_id") == request_id
+
     def _do_send(self, request):
         """Write request, poll for response, return result."""
         # Ensure comm dir exists
         if not os.path.isdir(self.comm_dir):
-            raise CLO3DConnectionError(
+            raise CLO3DNotRunningError(
                 "CLO3D communication directory not found: " + self.comm_dir + ". "
                 "Is CLO3D running with the MCP plugin loaded?"
             )
@@ -155,11 +179,15 @@ class CLO3DConnection:
         start_time = time.time()
         while True:
             elapsed = time.time() - start_time
-            if elapsed > TIMEOUT:
-                raise CLO3DConnectionError(
-                    "Timed out waiting for CLO3D response (" + str(TIMEOUT) + "s). "
-                    "The operation may still be running in CLO3D."
-                )
+            # The plug-in writes the reply before clearing "busy", so check for a reply first.
+            if elapsed > TIMEOUT and not os.path.exists(self.response_file):
+                busy = self._busy_with(request["id"])
+                if not busy or elapsed > MAX_BUSY:
+                    raise CLO3DTimeoutError(
+                        "Timed out waiting for CLO3D response (" + str(int(elapsed)) + "s). "
+                        + ("CLO is still running it; it was not re-sent." if busy else
+                           "Is the CLO MCP listener running? The command was not re-sent.")
+                    )
 
             if os.path.exists(self.response_file):
                 try:
@@ -186,7 +214,7 @@ class CLO3DConnection:
 
                     if response.get("status") == "error":
                         error_msg = response.get("message", "Unknown error from CLO3D")
-                        raise CLO3DConnectionError("CLO3D error: " + error_msg)
+                        raise CLO3DCommandError("CLO3D error: " + error_msg)
 
                     return response.get("result", {})
 

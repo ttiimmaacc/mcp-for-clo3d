@@ -119,7 +119,7 @@ Then ask things like *"What's in this project?"*, *"Create a rectangle pattern 4
 | Geometry | `get_pattern_geometry`: pieces with numbered outline lines (length, endpoints), internal shapes, and every seam mapped to the lines it uses |
 | Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `mirror_pattern`, `unfold_pattern`, `move_pattern_2d` |
 | Sewing | `sew_lines` (outline or internal-shape lines), `add_topstitch`, `list_topstitch_styles`, `set_seam_taping` |
-| Lines and shapes | `add_internal_shape`, `offset_internal_line`, `distribute_internal_lines`, `convert_shape`, `move_point`, `delete_point`, `delete_line` |
+| Lines and shapes | `add_internal_shape`, `offset_internal_line`, `convert_shape` (internal ↔ base line), `delete_point`, `delete_line` |
 | Piece state | `set_pattern_state` (freeze, strengthen, solidify, hide in 3D, layer, particle distance, grain), `get_pattern_state`, `remove_all_pins` |
 | Elastic and shrinkage | `set_elastic` (on/off, strength, ratio, segment and total length), `set_shrinkage` |
 | 3D placement | `get_arrangement_points`, `place_pattern` (arrangement point, orientation, position, Flat/Curved), `reset_arrangement`, `get_arrangement_list` |
@@ -136,7 +136,7 @@ an error, for requests it can't do.
 
 **Not possible through CLO's API (2025.2):** creating pins (they can only be removed), pleats or
 fold angles, free 3D move or rotate of a piece (placement goes through avatar arrangement points),
-and editing or removing an existing seam. To hold pieces in place, freeze or strengthen them. For
+and editing or removing an existing seam. Two SDK functions exist but did nothing in CLO 2025.2 testing, so they aren't exposed: `MovePatternPoint` (points never move) and `DistribueInternalLinesbetweenSegments` (created nothing on any pair of lines). To hold pieces in place, freeze or strengthen them. For
 pleats, draw fold lines with the internal-line tools and let the simulation fold them.
 
 ## How it works

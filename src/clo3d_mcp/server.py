@@ -615,40 +615,14 @@ def offset_internal_line(
 
 
 @mcp.tool()
-def distribute_internal_lines(
-    pattern_index: int, line_indices: list[int], count: int,
-    straight: bool = True, perpendicular: bool = False, graduate: bool = False,
-) -> dict:
-    """Distribute evenly spaced internal lines between outline lines (e.g. pleat or gather lines).
-
-    Args:
-        pattern_index: Pattern to draw on.
-        line_indices: Outline lines to distribute between (at least two).
-        count: Number of lines.
-        straight: Straight lines instead of curves.
-        perpendicular: Perpendicular to the segments.
-        graduate: Graduate the spacing along the segments.
-    """
-    return _send("distribute_internal_lines", {
-        "pattern_index": pattern_index, "line_indices": line_indices, "count": count,
-        "straight": straight, "perpendicular": perpendicular, "graduate": graduate})
-
-
-@mcp.tool()
 def convert_shape(pattern_index: int, internal_shape: int, to: str) -> dict:
     """Convert an internal shape to a base line ("base") or back ("internal")."""
     return _send("convert_shape", {"pattern_index": pattern_index, "internal_shape": internal_shape, "to": to})
 
 
 @mcp.tool()
-def move_point(pattern_index: int, point_index: int, x: float, y: float) -> dict:
-    """Move an outline point to (x, y). Point n is the start point of line n."""
-    return _send("move_point", {"pattern_index": pattern_index, "point_index": point_index, "x": x, "y": y})
-
-
-@mcp.tool()
 def delete_point(pattern_index: int, point_index: int) -> dict:
-    """Delete an outline point (point n is the start point of line n)."""
+    """Delete an outline point (point n is the start point of line n; see get_pattern_geometry)."""
     return _send("delete_point", {"pattern_index": pattern_index, "point_index": point_index})
 
 

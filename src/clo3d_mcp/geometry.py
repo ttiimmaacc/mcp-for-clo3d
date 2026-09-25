@@ -13,6 +13,7 @@ Verified against CLO 2025.2.236:
 
 EPS = 1e-4
 MIN_COVERAGE = 0.01  # ignore rounding slivers where a seam ends right at a line boundary
+SHAPE_TYPES = {1: "internal", 2: "base"}  # ShapeType values observed in CLO 2025.2.236
 
 
 def _pt(point):
@@ -75,10 +76,14 @@ def summarize(result, pattern_index=None, include_points=False):
             child_lengths = piece_lengths.get("internal_shapes", [])
             child_lengths = child_lengths[k] if k < len(child_lengths) else []
             shapes[shape.get("ID")] = (i, k, child_lengths)
+            fold = shape.get("FoldData", {})
             internal.append({
                 "internal_shape": k,
                 "closed": shape.get("IsClosed"),
-                "type": shape.get("ShapeType"),
+                # 1 = internal line, 2 = base line (convert_shape switches between them)
+                "type": SHAPE_TYPES.get(shape.get("ShapeType"), shape.get("ShapeType")),
+                "fold_angle": fold.get("iAngle"),
+                "fold_strength": fold.get("iStrength"),
                 "lines": _lines(shape.get("LineList", []), child_lengths, include_points),
             })
         outline = pattern.get("ShapeInfo", {}).get("LineList", [])
