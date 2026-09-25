@@ -753,7 +753,7 @@ std::map<std::string, Handler> BuildHandlers()
 		int before = ChildCount(pattern);
 		PATTERN_API->CreateInternalShapeWithPoints(pattern, points, p.boolean("closed", false));
 		return Value::object().set("pattern_index", pattern).set("point_count", (int)points.size())
-			.set("internal_shapes_created", RequireCreated(pattern, before, "the points must lie inside the piece"));
+			.set("internal_shapes_created", RequireCreated(pattern, before, "check the points (at least two, in pattern coordinates)"));
 	};
 	h["offset_internal_line"] = [](const Value& p) {
 		int pattern = PatternIndex(p), line = LineIndex(p, pattern);

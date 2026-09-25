@@ -58,12 +58,18 @@ CLO's SDK files can't be redistributed, so you download the SDK yourself.
 
 </details>
 
-### 2. Register it in CLO
+### 2. Load it in CLO
 
-1. **Plugins → Plug-in Manager → + ADD**, choose `CloMcpPlugin.dll`, name it, **OK**.
-2. **Plugins → Plug-in → CLO MCP Listener (start/stop)** now appears. The listener starts
-   when CLO loads the plug-in. Clicking the item stops or starts it and shows a message box with
-   the new state.
+**Recommended: start with CLO.** Close CLO, then run
+`cpp_plugin\install_autostart.bat path\to\CloMcpPlugin.dll`. This copies the DLL to
+`C:\Users\Public\Documents\CLO\Plugins\CloLibraryAPI_Plugin.dll`, which CLO loads at startup,
+so the listener runs as soon as CLO opens. `install_autostart.bat /remove` undoes it.
+
+**Or: menu item.** **Plugins → Plug-in Manager → + ADD**, choose `CloMcpPlugin.dll`, name it,
+**OK**. CLO adds **Plugins → Plug-in → CLO MCP Listener (start/stop)**, but it only loads a
+Plug-in Manager plug-in when you click its menu item. Without autostart, click it once per CLO
+session. With autostart, the item turns the same listener off and on, and a message box shows the
+new state.
 
 To check that it is running, open `%TEMP%\clo3d_mcp\status.json`. It should show
 `"state": "listening"` and a `ticks` count that keeps rising.
@@ -107,14 +113,28 @@ Then ask things like *"What's in this project?"*, *"Create a rectangle pattern 4
 | Area | Tools |
 |------|-------|
 | Scene | `get_project_info`, `new_project`, `open_file`, `save_project`, `get_garment_info`, `import_file` |
-| Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `get_arrangement_list` |
-| Fabrics | `get_fabric_list`, `add_fabric`, `replace_fabric`, `assign_fabric_to_pattern`, `set_fabric_color`, `get_fabric_for_pattern` |
+| Geometry | `get_pattern_geometry`: pieces with numbered outline lines (length, endpoints), internal shapes, and every seam mapped to the lines it uses |
+| Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `mirror_pattern`, `unfold_pattern`, `move_pattern_2d` |
+| Sewing | `sew_lines` (outline or internal-shape lines), `add_topstitch`, `list_topstitch_styles`, `set_seam_taping` |
+| Lines and shapes | `add_internal_shape`, `offset_internal_line`, `distribute_internal_lines`, `convert_shape`, `move_point`, `delete_point`, `delete_line` |
+| Piece state | `set_pattern_state` (freeze, strengthen, solidify, hide in 3D, layer, particle distance, grain), `get_pattern_state`, `remove_all_pins` |
+| Elastic and shrinkage | `set_elastic` (on/off, strength, ratio, segment and total length), `set_shrinkage` |
+| 3D placement | `get_arrangement_points`, `place_pattern` (arrangement point, orientation, position, Flat/Curved), `reset_arrangement`, `get_arrangement_list` |
+| Fabrics | `get_fabric_list`, `add_fabric`, `replace_fabric`, `assign_fabric_to_pattern`, `set_fabric_color`, `get_fabric_for_pattern`, `delete_fabric` |
+| Avatar | `get_avatars`, `import_avatar`, `show_avatar` |
 | Export | `export_obj`, `export_fbx`, `export_glb`, `export_gltf`, `export_thumbnail`, `export_snapshot`, `export_turntable`, `export_tech_pack` |
-| Simulation | `simulate` |
+| Simulation | `simulate`, `set_simulation_quality` |
 | Colorways | `get_colorways`, `set_current_colorway` |
 
-The plug-in also implements `ping`, fabric/colorway deletion, colorway copy/rename, avatar
-queries and simulation quality. These aren't exposed as MCP tools yet.
+Line-based tools take the line indices that `get_pattern_geometry` returns. The plug-in checks
+every pattern and line index before calling CLO, because CLO doesn't check them. Line-creating
+tools report how many internal shapes CLO actually created, because CLO creates nothing, without
+an error, for requests it can't do.
+
+**Not possible through CLO's API (2025.2):** creating pins (they can only be removed), pleats or
+fold angles, free 3D move or rotate of a piece (placement goes through avatar arrangement points),
+and editing or removing an existing seam. To hold pieces in place, freeze or strengthen them. For
+pleats, draw fold lines with the internal-line tools and let the simulation fold them.
 
 ## How it works
 
@@ -164,7 +184,9 @@ the result.
 - **The client times out:** check `status.json`. If it's missing or `ticks` isn't rising, start
   the listener from **Plugins → Plug-in**.
 - **Rebuilding fails with `LNK1104: cannot open file ...CloMcpPlugin.dll`:** CLO has the DLL
-  loaded. Close CLO, then rebuild.
+  loaded. Close CLO, or rename the loaded DLL (Windows allows renaming a file that's in use) and
+  rebuild. CLO keeps using the old copy until it restarts. With autostart, run
+  `install_autostart.bat` again after rebuilding, with CLO closed.
 - **CLO crashes when adding the plug-in, or calls do odd things:** the SDK doesn't match your CLO
   version.
 

@@ -583,8 +583,9 @@ def add_internal_shape(pattern_index: int, points: list[list[float]], closed: bo
 
     Args:
         pattern_index: Pattern to draw on.
-        points: [[x, y], ...] or [[x, y, type], ...] in pattern coordinates (mm);
-            type 0 = straight, 2 = spline curve, 3 = bezier curve.
+        points: [[x, y], ...] or [[x, y, type], ...] in pattern coordinates (mm), inside the
+            piece (CLO also accepts points outside it); type 0 = straight, 2 = spline curve,
+            3 = bezier curve. Use get_pattern_geometry for the piece's coordinates.
         closed: Connect the last point back to the first.
     """
     return _send("add_internal_shape", {"pattern_index": pattern_index, "points": points, "closed": closed})
