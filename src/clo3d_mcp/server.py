@@ -115,7 +115,12 @@ def view_patterns(pattern_index: int | None = None) -> list:
 @mcp.tool()
 def get_cloth_bounds() -> dict:
     """3D bounding box (mm) of all cloth: min/max [x, y, z]. CLO's 3D axes: Y is up, Z points
-    towards the front view camera, X to the avatar's left. Use it to place rods and props."""
+    towards the front view camera, X to the avatar's left. Use it to place rods and props.
+
+    CLO only reports cloth once it has been simulated, and reports nothing while every piece
+    is frozen: run simulate(1) with at least one piece unfrozen first. A flat new piece lies
+    at its 2D (x, y) coordinates in the plane z = 200.
+    """
     return _send("get_cloth_bounds")
 
 
@@ -124,7 +129,11 @@ def add_rod(center: list[float], length: float, diameter: float = 25.0, axis: st
     """Add a cylinder (curtain rod, rail, hanger bar...) that cloth collides with.
 
     It is imported as a collision object (CLO treats it like an avatar), exactly at `center`.
-    For a rod-pocket curtain: run the rod along x at the height of the pocket.
+    Tested with a rod-pocket curtain in CLO 2025.2:
+    - Cloth passes through a thin rod unless its mesh is finer than the rod: set the pieces'
+      particle_distance to about a third of the diameter (set_pattern_state) and use >= 30 mm.
+    - Folding cloth is pushed away by the rod, so form a pocket first (panel frozen, no rod),
+      then add the rod inside the formed tube and unfreeze.
 
     Args:
         center: [x, y, z] centre in mm (see get_cloth_bounds for where the cloth is).
