@@ -24,3 +24,10 @@ def test_renders_pieces_and_seams_as_png():
 def test_single_piece():
     summary = summarize(_result([]), pattern_index=1, include_points=True)
     assert Image.open(io.BytesIO(render_patterns(summary))).format == "PNG"
+
+
+def test_layered_pieces_get_their_own_label_line():
+    summary = summarize(_result([]), include_points=True)
+    for piece in summary["pieces"]:
+        piece["layer"] = -1 if piece["pattern_index"] else 0
+    assert Image.open(io.BytesIO(render_patterns(summary))).format == "PNG"

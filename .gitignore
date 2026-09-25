@@ -34,3 +34,6 @@ clo_sdk*/
 .DS_Store
 *.log
 *.tmp
+
+# Topstitch style files (hold CLO stitch textures)
+*.sst

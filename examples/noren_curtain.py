@@ -133,15 +133,23 @@ if __name__ == "__main__":
 
     # --- appliqué: front and reverse, sewn along their inner edges ---
     x0, x1, y0, y1 = HEADER
-    applique(body_l, [[SPLIT, y1], [x0, y1], [x0, y0], [SPLIT, y0]], 3, "light", "Header L")
-    applique(body_r, [[SPLIT, y1], [x1, y1], [x1, y0], [SPLIT, y0]], 3, "light", "Header R")
-    applique(body_l, star_half(+1), STAR_POINTS, "light", "Star L")
-    applique(body_r, star_half(-1), STAR_POINTS, "light", "Star R")
+    patches = []
+    patches.append(applique(body_l, [[SPLIT, y1], [x0, y1], [x0, y0], [SPLIT, y0]], 3, "light", "Header L"))
+    patches.append(applique(body_r, [[SPLIT, y1], [x1, y1], [x1, y0], [SPLIT, y0]], 3, "light", "Header R"))
+    patches.append(applique(body_l, star_half(+1), STAR_POINTS, "light", "Star L"))
+    patches.append(applique(body_r, star_half(-1), STAR_POINTS, "light", "Star R"))
     qx0, qx1, qy0, qy1 = LEFT["square"]    # beside the strip, on top of the band: 2 free edges
-    applique(body_l, [[qx0, qy1], [qx1, qy1], [qx1, qy0], [qx0, qy0]], 2, "light", "Square L")
+    patches.append(applique(body_l, [[qx0, qy1], [qx1, qy1], [qx1, qy0], [qx0, qy0]], 2, "light", "Square L"))
     qx0, qx1, qy0, qy1 = RIGHT["square"]   # beside the strip, level with its top: 3 free edges
-    applique(body_r, [[qx1, qy1], [qx0, qy1], [qx0, qy0], [qx1, qy0]], 3, "light", "Square R")
+    patches.append(applique(body_r, [[qx1, qy1], [qx0, qy1], [qx0, qy0], [qx1, qy0]], 3, "light", "Square R"))
     step("appliqué: header, star and squares, front and reverse (%d pieces)" % s.get_pattern_count()["count"])
+
+    # --- appliqué stitching: 0.4 mm thread, 4 mm in from each sewn patch edge (the 4 mm return) ---
+    style = s.create_topstitch_style("Noren appliqué 4 mm", thread_thickness_mm=0.4, offset_mm=4.0)
+    seams = [seam for made in patches for patch in made["patches"] for seam in patch["seams"]]
+    for seam in seams:
+        s.add_topstitch(style["style_index"], seam_index=seam)
+    step("appliqué stitching: %d seams, %s" % (len(seams), {k: style[k] for k in ("thread_tex", "offset_mm")}))
 
     if "--flat-only" in sys.argv:  # stop before the rod pocket (e.g. to inspect the flat layout)
         step("flat build done in %.0f s" % (time.time() - t0))

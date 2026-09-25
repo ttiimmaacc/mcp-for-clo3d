@@ -98,13 +98,16 @@ def view_patterns(pattern_index: int | None = None) -> list:
     """Picture of the 2D pattern pieces with every outline line numbered and seams coloured.
 
     Blue numbers are line_index values for sewing, elastic, topstitch and seam taping; "sN"
-    marks lines sewn by seam N; grey lines are internal lines. Pair it with
-    get_pattern_geometry for exact lengths and coordinates.
+    marks lines sewn by seam N; grey lines are internal lines. Pieces on another layer
+    (appliqué, hem strips) lie on their base piece and are labelled with their layer, +z or -z.
+    Pair it with get_pattern_geometry for exact lengths and coordinates.
 
     Args:
         pattern_index: Draw only this piece (default: all pieces).
     """
     summary = summarize(_send("get_pattern_geometry"), pattern_index, include_points=True)
+    for piece in summary["pieces"]:
+        piece["layer"] = _send("get_pattern_state", {"pattern_index": piece["pattern_index"]}).get("layer", 0)
     return [Image(data=render_patterns(summary), format="png"),
             "%d pieces, %d seams" % (len(summary["pieces"]), len(summary["seams"]))]
 
@@ -607,8 +610,18 @@ def create_pattern(points: list[list[float]]) -> dict:
         points: List of [x, y] or [x, y, type] coordinates in mm.
                 Type: 0=straight (default), 2=spline, 3=bezier.
                 Example: [[0,0], [100,0], [100,200], [0,200]]
+
+    Returns the new pattern_index and its outline lines (line_index, start, end, length), so
+    you can sew, hem or topstitch without looking the piece up.
     """
-    return _send("create_pattern", {"points": points})
+    index = _send("get_pattern_count")["count"]
+    result = _send("create_pattern", {"points": points})
+    if _send("get_pattern_count")["count"] != index + 1:
+        return result
+    pieces = [p for p in summarize(_send("get_pattern_geometry"))["pieces"] if p["pattern_index"] == index]
+    lines = [{"line_index": l["line_index"], "start": l["start"], "end": l["end"], "length": l["length"]}
+             for l in pieces[0]["lines"]] if pieces else []
+    return dict(result, pattern_index=index, lines=lines)
 
 
 @mcp.tool()
@@ -998,6 +1011,70 @@ def sew_lines(
 def list_topstitch_styles() -> dict:
     """List the topstitch styles in the project, for add_topstitch's style_index."""
     return _send("list_topstitch_styles")
+
+
+# A topstitch style saved from CLO once, kept outside the temp folder and the repo (it holds
+# CLO's stitch textures); create_topstitch_style patches copies of it.
+STITCH_TEMPLATE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "clo3d_mcp",
+                               "topstitch_template.sst")
+
+
+@mcp.tool()
+def create_topstitch_style(name: str, stitch_length_mm: float | None = None,
+                           thread_thickness_mm: float | None = None, offset_mm: float | None = None,
+                           template_path: str | None = None) -> dict:
+    """Create a topstitch style with a given stitch length, thread thickness and offset from
+    the stitched line (CLO's API cannot set these on a style, so a saved style file is copied
+    with the values changed and imported). Returns its style_index for add_topstitch.
+
+    Needs a template once: in CLO select any topstitch in the Object Browser, click the save
+    icon in the Property Editor's Topstitch row and pass that .sst as template_path; it is
+    kept for later calls.
+
+    Args:
+        name: Name for the new style.
+        stitch_length_mm: Length of each stitch in mm (default: the template's).
+        thread_thickness_mm: Thread thickness in mm (CLO shows it as Tex: 0.2 mm = 40 Tex).
+        offset_mm: Distance of the stitching from the line or seam it follows, in mm.
+        template_path: A .sst saved from CLO (only needed the first time).
+    """
+    import shutil
+    from clo3d_mcp.stitch_style import make_style, read_values
+    if template_path:
+        os.makedirs(os.path.dirname(STITCH_TEMPLATE), exist_ok=True)
+        if os.path.abspath(template_path) != os.path.abspath(STITCH_TEMPLATE):
+            shutil.copyfile(template_path, STITCH_TEMPLATE)
+    if not os.path.exists(STITCH_TEMPLATE):
+        raise ValueError("no topstitch template yet: save any topstitch style from CLO's Property Editor "
+                         "(save icon in the Topstitch row) and pass the .sst as template_path")
+    with open(STITCH_TEMPLATE, "rb") as f:
+        style = make_style(f.read(), stitch_length_mm, thread_thickness_mm, offset_mm)
+    path = os.path.join(_work_dir("stitches"), "style_%d.sst" % int(time.time() * 1000))
+    with open(path, "wb") as f:
+        f.write(style)
+    result = _send("import_topstitch_style", {"file_path": path})
+    if "style_index" not in result:
+        raise RuntimeError("CLO did not add the style: %s" % result)
+    _send("set_topstitch_style", {"style_index": result["style_index"], "name": name})
+    length, thickness, offset = read_values(style)
+    return {"style_index": result["style_index"], "name": name, "stitch_length_mm": length,
+            "thread_thickness_mm": thickness, "thread_tex": round(thickness * 200), "offset_mm": offset}
+
+
+@mcp.tool()
+def get_topstitch_style(style_index: int) -> dict:
+    """A topstitch style's name, offset and per-line values as CLO's API reports them
+    (stitch length and thread thickness are not readable through the API)."""
+    return _send("get_topstitch_style", {"style_index": style_index})
+
+
+@mcp.tool()
+def set_topstitch_style(style_index: int, name: str | None = None, color: list[int] | None = None,
+                        number_of_lines: int | None = None) -> dict:
+    """Rename a topstitch style, set its thread colour ([r, g, b] 0-255) or its number of
+    parallel lines. For stitch length, thread thickness and offset use create_topstitch_style."""
+    return _send("set_topstitch_style", _given(style_index=style_index, name=name, color=color,
+                                               number_of_lines=number_of_lines))
 
 
 @mcp.tool()

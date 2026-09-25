@@ -69,6 +69,7 @@ def render_patterns(summary, size=1400, margin=40):
                 key = (side.get("pattern_index"), side.get("internal_shape"), line["line_index"])
                 seam_of.setdefault(key, (seam["seam_index"], colour))
 
+    labels = {}
     for piece in pieces:
         index = piece["pattern_index"]
         outline_px = [to_px(p) for l in piece["lines"] for p in _polyline(l)]
@@ -88,8 +89,14 @@ def render_patterns(summary, size=1400, margin=40):
         if outline_px:  # name above the piece, clear of the line labels
             left = min(x for x, _ in outline_px)
             top = min(y for _, y in outline_px)
-            draw.text((left, max(top - 34, 2)), "#%d %s" % (index, piece.get("name") or ""),
-                      fill=(0, 0, 0), font=label)
+            layer = piece.get("layer")
+            text = "#%d %s" % (index, piece.get("name") or "")
+            if layer:  # pieces on other layers (patches, hems) lie on top of their base piece
+                text += "  [layer %+d %s]" % (layer, "+z" if layer > 0 else "-z")
+            spot = (round(left), round(top))
+            stacked = labels.get(spot, 0)  # same outline as a piece already labelled: stack
+            labels[spot] = stacked + 1
+            draw.text((left, max(top - 34, 2) + 18 * stacked), text, fill=(0, 0, 0), font=label)
 
     draw.text((margin, image.height - 26),
               "Blue numbers = line_index; sN = seam_index; coloured lines are sewn; grey = internal lines",

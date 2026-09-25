@@ -826,6 +826,62 @@ std::map<std::string, Handler> BuildHandlers()
 	h["list_topstitch_styles"] = [](const Value&) {
 		return Value::object().set("styles", Value::from(PATTERN_API->GetTopstitchStyleList()));
 	};
+	h["import_topstitch_style"] = [](const Value& p) {
+		std::string path = p.str("file_path");
+		int before = UTILITY_API->GetTopStitchCount(false);
+		bool ok = PATTERN_API->ImportTopStitchStyle(path);
+		int after = UTILITY_API->GetTopStitchCount(false);
+		Value r = Value::object().set("imported", ok).set("file_path", path).set("style_count", after);
+		if (after > before)
+			r.set("style_index", after - 1).set("name", UTILITY_API->GetTopStitchName(after - 1));
+		return r;
+	};
+	h["get_all_stitch_property"] = [](const Value&) {
+		return Value::object().set("json", PATTERN_API->GetAllStitchProperty());
+	};
+	h["get_topstitch_style"] = [](const Value& p) {
+		int style = I(p, "style_index");
+		if (style < 0 || style >= UTILITY_API->GetTopStitchCount(false))
+			throw std::runtime_error("style_index is out of range");
+		Value lines = Value::array();
+		for (int k = 1; k <= 3; ++k)
+		{
+			Marvelous::CloApiRgba c = UTILITY_API->GetTopStitchColor(style, k - 1);
+			Value color = Value::array();
+			for (int v : {(int)c.R, (int)c.G, (int)c.B, (int)c.A})
+				color.a.push_back(v);
+			lines.a.push_back(Value::object().set("count_index", k)
+				.set("number_of_lines", UTILITY_API->GetTopStitchNumberOfLines(style, k))
+				.set("width", UTILITY_API->GetTopStitchWidthValue(style, k))
+				.set("distance", UTILITY_API->GetTopStitchDistanceValue(style, k))
+				.set("color_line_index", k - 1).set("color", color));
+		}
+		return Value::object().set("style_index", style).set("name", UTILITY_API->GetTopStitchName(style))
+			.set("offset_index", UTILITY_API->GetTopStitchOffsetIndex(style))
+			.set("offset_value", UTILITY_API->GetTopStitchOffsetValue(style))
+			.set("model_type", PATTERN_API->GetTopstitchStyleModelType(style)).set("lines", lines);
+	};
+	h["set_topstitch_style"] = [](const Value& p) {
+		int style = I(p, "style_index");
+		if (style < 0 || style >= UTILITY_API->GetTopStitchCount(false))
+			throw std::runtime_error("style_index is out of range");
+		if (p.has("name")) UTILITY_API->SetTopStitchName(style, p.str("name"));
+		if (p.has("offset_index")) UTILITY_API->SetTopStitchOffsetIndex(style, I(p, "offset_index"));
+		if (p.has("model_type")) PATTERN_API->SetTopstitchStyleModelType(style, I(p, "model_type"));
+		int k = I(p, "count_index", 1);
+		if (p.has("number_of_lines")) UTILITY_API->SetTopStitchNumberOfLines(style, k, I(p, "number_of_lines"));
+		if (p.has("width")) UTILITY_API->SetTopStitchWidthValue(style, k, (float)p.num("width"));
+		if (p.has("distance")) UTILITY_API->SetTopStitchDistanceValue(style, k, (float)p.num("distance"));
+		if (p.has("color"))
+		{
+			const Value* c = p.find("color");
+			if (c->type != Value::Array || c->a.size() < 3)
+				throw std::runtime_error("color must be [r, g, b] or [r, g, b, a]");
+			UTILITY_API->SetTopStitchColor(style, I(p, "color_line_index", k - 1), (int)c->a[0].n, (int)c->a[1].n,
+										   (int)c->a[2].n, c->a.size() > 3 ? (int)c->a[3].n : 255);
+		}
+		return Value::object().set("style_index", style).set("set", true);
+	};
 	h["add_topstitch"] = [](const Value& p) {
 		int style = I(p, "style_index");
 		bool ok;
