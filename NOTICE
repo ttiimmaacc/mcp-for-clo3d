@@ -1,0 +1,16 @@
+Third-party material
+====================
+
+This repository contains no files from CLO Virtual Fashion Inc.
+
+Building the native plug-in (cpp_plugin/) requires CLO's API/SDK package, which you
+download yourself from https://developer.clo3d.com/download.html. The SDK's headers,
+libraries and samples belong to CLO Virtual Fashion Inc., are governed by CLO's own
+terms (https://legal.clo-set.com/additional-clo), and are not covered by this project's
+licence. You need your own CLO3D licence to use it.
+
+cpp_plugin/test/pure_stubs.h is generated locally from those headers by gen_stubs.py
+and is deliberately not committed.
+
+The Python MCP server in src/clo3d_mcp/ is derived from
+https://github.com/Ubani-Studio/clo3d-mcp, Copyright (c) 2026 Violet Sphinx, MIT License.

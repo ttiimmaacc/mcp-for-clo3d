@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-for-clo3d"
+version = "0.1.0"
+description = "MCP server and native CLO plug-in for controlling CLO3D from AI assistants"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "ttiimmaacc" }, { name = "Violet Sphinx" }]
+keywords = ["clo3d", "mcp", "fashion", "3d", "garment", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+dependencies = ["mcp[cli]>=1.9.0,<2"]
+
+[project.scripts]
+mcp-for-clo3d = "clo3d_mcp:main"
+clo3d-mcp = "clo3d_mcp:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clo3d_mcp"]

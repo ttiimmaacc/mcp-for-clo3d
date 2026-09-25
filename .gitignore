@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+*.whl
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Native plug-in build output
+cpp_plugin/build/
+cpp_plugin/dist/
+cpp_plugin/test/pure_stubs.h
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+
+# CLO SDK files are never committed (CLO Virtual Fashion's material, see NOTICE)
+CLOAPIInterface/
+clo_sdk*/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+*.log
+*.tmp
