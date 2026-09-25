@@ -1,0 +1,74 @@
+"""End-to-end smoke test of CloMcpPlugin.dll without CLO.
+
+Runs host_add.exe (CLO's Plug-in Manager load -> read name -> unload sequence, then a second
+copy toggled via DoFunction) and talks to the plug-in through the MCP server's own client.
+Build first with build.bat and test/build_tests.bat.
+"""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+DLL = os.path.join(ROOT, "cpp_plugin", "dist", "CloMcpPlugin.dll")
+HOST = os.path.join(HERE, "host_add.exe")
+
+
+def main():
+    work = tempfile.mkdtemp(prefix="clo_mcp_smoke_")
+    comm = os.path.join(work, "comm")
+    copy = os.path.join(work, "copy", "CloMcpPlugin.dll")
+    os.makedirs(os.path.dirname(copy))
+    shutil.copy(DLL, copy)
+    os.environ["CLO3D_MCP_DIR"] = comm
+
+    host = subprocess.Popen([HOST, DLL, copy, "12"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    deadline = time.time() + 10
+    while not os.path.exists(os.path.join(comm, "status.json")):
+        if time.time() > deadline or host.poll() is not None:
+            print(host.communicate()[0])
+            sys.exit("FAIL: listener never started")
+        time.sleep(0.1)
+
+    from clo3d_mcp.connection import CLO3DConnectionError, get_connection
+    conn = get_connection()
+    failures = []
+
+    def check(name, got, expected):
+        status = "ok  " if got == expected else "FAIL"
+        if got != expected:
+            failures.append(name)
+        print("%s %-18s %s" % (status, name, got))
+
+    check("ping", conn.send_command("ping", retries=1).get("pong"), True)
+    patterns = conn.send_command("get_pattern_list", retries=1)
+    check("get_pattern_list", [p["name"] for p in patterns["patterns"]], ["Piece 0", "Piece 1"])
+    check("set_pattern_name", conn.send_command("set_pattern_name", {"pattern_index": 0, "name": "Front"}, retries=1),
+          {"index": 0, "name": "Front"})
+    for cmd, expected in [("bogus_command", "Unknown command"), ("get_project_info", "native exception")]:
+        try:
+            conn.send_command(cmd, retries=1)
+            check(cmd, "no error", expected)
+        except CLO3DConnectionError as e:
+            check(cmd, expected if expected in str(e) else str(e), expected)
+
+    output = host.communicate(timeout=30)[0]
+    print(output.strip())
+    for line in ("module still mapped: yes", "UI loop survived, listeners in process: 1",
+                 "DoFunction (stop) -> listeners: 0", "DoFunction (start) -> listeners: 1", "done"):
+        check("host: " + line.split(",")[0][:30], line in output, True)
+    check("host exit code", host.returncode, 0)
+
+    shutil.rmtree(work, ignore_errors=True)
+    if failures:
+        sys.exit("FAIL: " + ", ".join(failures))
+    print("OK: smoke test passed")
+
+
+if __name__ == "__main__":
+    main()

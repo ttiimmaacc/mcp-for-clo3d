@@ -1,0 +1,111 @@
+name: Build plug-in
+
+# Every push and pull request builds and tests CloMcpPlugin.dll.
+# Pushing a tag like v0.1.0 also publishes a GitHub Release with the DLL attached.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The DLL only works with the exact CLO build its SDK matches (C++ vtable layout).
+  CLO_VERSION: "2025.2.236"
+  # CLO's official SDK download (developer.clo3d.com/download.html). Fetched at build time and
+  # never stored in this repository; the checksum pins the exact file.
+  CLO_SDK_URL: https://s3.us-east-1.amazonaws.com/Outside_Work/CLO_API/9_1_0/CLO_SDK_v2025.2.236_WIN.zip
+  CLO_SDK_SHA256: 655205401241b697efbcb21763f6a308216d5483a7412eabefc49f5f4997d202
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download CLO SDK
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "clo_sdk.zip"
+          Invoke-WebRequest $env:CLO_SDK_URL -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:CLO_SDK_SHA256) { throw "CLO SDK checksum mismatch: $hash" }
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "clo_sdk")
+          $sdk = Join-Path $env:RUNNER_TEMP "clo_sdk\CLO_SDK_v$($env:CLO_VERSION)_WIN"
+          if (-not (Test-Path "$sdk\CLOAPIInterface\Lib\CLOAPIInterface.lib")) { throw "unexpected SDK layout" }
+          "CLO_SDK_DIR=$sdk" >> $env:GITHUB_ENV
+
+      - name: Build plug-in
+        shell: cmd
+        run: cpp_plugin\build.bat
+
+      - name: Check imports against CLO's runtime DLLs
+        run: >
+          uv run --no-project python cpp_plugin/check_runtime.py
+          --exports cpp_plugin/clo_exports/${{ env.CLO_VERSION }}
+          --clo-api-dll "${{ env.CLO_SDK_DIR }}\CLOAPIInterface\Lib\CLOAPIInterface.dll"
+
+      - name: Build test hosts
+        shell: cmd
+        run: cpp_plugin\test\build_tests.bat
+
+      - name: Smoke test (real DLL, stand-in host, MCP client)
+        run: uv run --no-project python cpp_plugin/test/smoke_test.py
+
+      - name: Server tests
+        run: |
+          uv run --with pytest pytest -q
+          uv run python -c "import asyncio; from clo3d_mcp.server import mcp; print(len(asyncio.run(mcp.list_tools())), 'tools')"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory release | Out-Null
+          Copy-Item cpp_plugin\dist\CloMcpPlugin.dll release\
+          $hash = (Get-FileHash release\CloMcpPlugin.dll -Algorithm SHA256).Hash.ToLower()
+          "$hash  CloMcpPlugin.dll" | Out-File -Encoding ascii release\CloMcpPlugin.dll.sha256
+          Get-Content release\CloMcpPlugin.dll.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloMcpPlugin-clo${{ env.CLO_VERSION }}
+          path: release/
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: CloMcpPlugin-clo${{ env.CLO_VERSION }}
+          path: release
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          Native CLO plug-in for **CLO ${CLO_VERSION}** on Windows. It only works with this exact
+          CLO build.
+
+          **Install:** download \`CloMcpPlugin.dll\`, then in CLO open **Plugins → Plug-in Manager →
+          + ADD**, pick the DLL and click OK. The listener starts right away; **Plugins → Plug-in →
+          CLO MCP Listener** stops or starts it. Then connect your MCP client as described in the
+          README.
+
+          Built from ${GITHUB_SHA} by GitHub Actions against CLO SDK v${CLO_VERSION} (SHA-256
+          \`${CLO_SDK_SHA256}\`). SHA-256 of the DLL: \`$(cut -d' ' -f1 release/CloMcpPlugin.dll.sha256)\`.
+          EOF
+          gh release create "$GITHUB_REF_NAME" release/CloMcpPlugin.dll release/CloMcpPlugin.dll.sha256 \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME (CLO $CLO_VERSION)" --notes-file notes.md

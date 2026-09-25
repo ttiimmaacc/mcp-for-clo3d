@@ -29,7 +29,16 @@ thread, so every request is executed on the main thread between UI events.
 
 ### 1. Get the plug-in DLL
 
-Build it yourself. CLO's SDK files can't be redistributed here, so there is no prebuilt DLL.
+Download `CloMcpPlugin.dll` from the
+[latest release](https://github.com/ttiimmaacc/mcp-for-clo3d/releases/latest). Each release says
+which CLO version it's for, and the DLL only works with that exact CLO build (currently
+**2025.2.236**). GitHub Actions builds every release from this repo against CLO's official SDK,
+and each release includes the DLL's SHA-256 checksum.
+
+<details>
+<summary>Or build it yourself (needed for any other CLO version)</summary>
+
+CLO's SDK files can't be redistributed, so you download the SDK yourself.
 
 1. Install **Visual Studio Build Tools** with the *Desktop development with C++* workload.
 2. Download the CLO SDK that matches your CLO version from
@@ -47,9 +56,11 @@ Build it yourself. CLO's SDK files can't be redistributed here, so there is no p
 > **Use the SDK for your exact CLO version.** The plug-in calls CLO through C++ vtables. Headers
 > from another CLO version put functions at different slots and will call the wrong ones.
 
+</details>
+
 ### 2. Register it in CLO
 
-1. **Plugins → Plug-in Manager → + ADD**, choose `cpp_plugin\dist\CloMcpPlugin.dll`, name it, **OK**.
+1. **Plugins → Plug-in Manager → + ADD**, choose `CloMcpPlugin.dll`, name it, **OK**.
 2. **Plugins → Plug-in → CLO MCP Listener (start/stop)** now appears. The listener starts
    when CLO loads the plug-in. Clicking the item stops or starts it and shows a message box with
    the new state.
@@ -124,11 +135,29 @@ queries and simulation quality. These aren't exposed as MCP tools yet.
 ```bash
 uv run --with pytest pytest          # server tests (mock plug-in)
 cpp_plugin\test\build_tests.bat      # builds two stand-in hosts that load the real DLL outside CLO
+python cpp_plugin\test\smoke_test.py # DLL + stand-in host + MCP client, end to end
 ```
 
 `host.exe` loads the plug-in and runs a Win32 event loop. `host_add.exe` reproduces the
 Plug-in Manager's load → read name → unload sequence. Both use CLO's real `CLOAPIInterface.dll`
 with fake API objects, so you can test the plug-in and the MCP client without CLO.
+
+### Releases
+
+[`.github/workflows/build.yml`](.github/workflows/build.yml) runs on every push and pull request.
+It downloads CLO's SDK from CLO's official link (checksum-pinned, never committed), builds the DLL,
+checks its imports against CLO's runtime export lists in `cpp_plugin/clo_exports/<version>/`, and
+runs the tests and smoke test. Pushing a tag publishes a release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+To support a new CLO version, update `CLO_VERSION`, `CLO_SDK_URL` and `CLO_SDK_SHA256` in the
+workflow. Then, on a machine with that CLO installed, run
+`python cpp_plugin\check_runtime.py --write-exports cpp_plugin\clo_exports\<version>` and commit
+the result.
 
 ## Troubleshooting
 
