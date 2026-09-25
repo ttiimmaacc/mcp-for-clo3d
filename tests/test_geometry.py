@@ -73,3 +73,20 @@ def test_internal_shape_seam_and_pattern_filter():
 def test_slivers_at_line_boundaries_are_ignored():
     seam = summarize(_result([(_side("A", 0.2499, 0.5001, True), _side("B", 0.0, 0.25, True))]))["seams"][0]
     assert _lines(seam["sides"][0]) == [(1, 1.0)]
+
+
+def test_seam_end_points_and_what_is_sewn_together():
+    # A: forward over line 1 ((100,0) -> (100,100)); B: backward from 0.75 to 0.5, i.e. line 2
+    # walked from (0,100) to (100,100)
+    seam = summarize(_result([(_side("A", 0.25, 0.5, True), _side("B", 0.75, 0.5, False))]))["seams"][0]
+    a, b = seam["sides"]
+    assert a["start_point"] == [100, 0] and a["end_point"] == [100, 100]
+    assert b["start_point"] == [0, 100] and b["end_point"] == [100, 100]
+    assert seam["sewn_together"] == [{"a": [100, 0], "b": [0, 100]}, {"a": [100, 100], "b": [100, 100]}]
+
+
+def test_end_points_on_internal_shape_and_across_the_start():
+    seam = summarize(_result([(_side("A-fold", 0.0, 1.0, True), _side("B", 0.875, 0.125, True))]))["seams"][0]
+    fold, wrap = seam["sides"]
+    assert fold["start_point"] == [50, 0] and fold["end_point"] == [50, 100]
+    assert wrap["start_point"] == [0, 50] and wrap["end_point"] == [50, 0]

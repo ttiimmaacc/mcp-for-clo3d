@@ -721,8 +721,12 @@ def get_pattern_geometry(pattern_index: int | None = None, include_points: bool 
 
     Use this before sewing or editing lines: every line-based tool takes the `line_index`
     values listed here. Each line has its length (mm) and start/end points in 2D pattern
-    coordinates. Each seam lists, for both sides, the pattern, optional internal shape and the
-    lines it covers (coverage 1.0 = whole line).
+    coordinates. Each seam lists, for both sides, the pattern, optional internal shape, the
+    lines it covers (coverage 1.0 = whole line) and where stitching starts and ends.
+    "sewn_together" pairs those ends (side a's start is sewn to side b's start, end to end):
+    if a left end is paired with a right end the seam is twisted; sew it again with one
+    direction flipped. A pocket's fold-over seam deliberately pairs the strip's top edge with
+    a lower line.
 
     Args:
         pattern_index: Only return this piece and the seams touching it (default: all).

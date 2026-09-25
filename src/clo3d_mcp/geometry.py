@@ -60,22 +60,49 @@ def _lines_in_ranges(lengths, ranges):
     return used
 
 
+def _point_at(line_list, lengths, fraction):
+    """2D point at `fraction` (0-1) of a shape's perimeter; exact lengths pick the line, then
+    the position is interpolated along that line's points."""
+    total = sum(lengths)
+    if total <= 0 or not line_list:
+        return None
+    target = min(max(fraction, 0.0), 1.0) * total
+    for line, length in zip(line_list, lengths):
+        pts = [(p["Position"]["x"], p["Position"]["y"]) for p in line.get("PointList", [])]
+        if target <= length + 1e-6 or line is line_list[-1]:
+            if len(pts) < 2:
+                return [round(pts[0][0], 1), round(pts[0][1], 1)] if pts else None
+            segs = [((ax, ay), (bx, by), ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5)
+                    for (ax, ay), (bx, by) in zip(pts, pts[1:])]
+            poly = sum(s[2] for s in segs) or 1.0
+            want = min(target / (length or 1.0), 1.0) * poly
+            for (ax, ay), (bx, by), seg in segs:
+                if want <= seg + 1e-9:
+                    t = want / seg if seg else 0.0
+                    return [round(ax + t * (bx - ax), 1), round(ay + t * (by - ay), 1)]
+                want -= seg
+            return [round(pts[-1][0], 1), round(pts[-1][1], 1)]
+        target -= length
+    return None
+
+
 def summarize(result, pattern_index=None, include_points=False):
     """Build pieces and seams from the plug-in's get_pattern_geometry result."""
     export = result.get("export", {})
     lengths = result.get("line_lengths", [])
     patterns = export.get("PatternList", [])
 
-    shapes = {}  # shape ID -> (pattern index, internal shape index or None, line lengths)
+    shapes = {}  # shape ID -> (pattern index, internal shape index or None, line lengths, lines)
     pieces = []
     for i, pattern in enumerate(patterns):
         piece_lengths = lengths[i] if i < len(lengths) else {"outline": [], "internal_shapes": []}
-        shapes[pattern.get("ID")] = (i, None, piece_lengths.get("outline", []))
+        shapes[pattern.get("ID")] = (i, None, piece_lengths.get("outline", []),
+                                     pattern.get("ShapeInfo", {}).get("LineList", []))
         internal = []
         for k, shape in enumerate(pattern.get("InternalLineList", [])):
             child_lengths = piece_lengths.get("internal_shapes", [])
             child_lengths = child_lengths[k] if k < len(child_lengths) else []
-            shapes[shape.get("ID")] = (i, k, child_lengths)
+            shapes[shape.get("ID")] = (i, k, child_lengths, shape.get("LineList", []))
             fold = shape.get("FoldData", {})
             internal.append({
                 "internal_shape": k,
@@ -117,15 +144,27 @@ def summarize(result, pattern_index=None, include_points=False):
                     if owner[1] is not None:
                         entry["internal_shape"] = owner[1]
                     entry["lines"] = _lines_in_ranges(owner[2], _covered_ranges(start, end, forward))
+                    # where stitching starts and ends on this side (2D pattern coordinates)
+                    entry["start_point"] = _point_at(owner[3], owner[2], start)
+                    entry["end_point"] = _point_at(owner[3], owner[2], end)
                 else:
                     entry["shape_id"] = side.get("ShapeID")
                 sides.append(entry)
+        # CLO sews side a's start to side b's start and end to end; listing the pairs makes a
+        # twisted seam (left end sewn to right end) easy to spot
+        together = []
+        for a, b in zip(sides[0::2], sides[1::2]):
+            together.append({"a": a.get("start_point"), "b": b.get("start_point")})
+            together.append({"a": a.get("end_point"), "b": b.get("end_point")})
         seams.append({
             "seam_index": names.index(name) if name in names else s,
             "name": name,
             "fold_angle": group.get("FoldData", {}).get("iAngle"),
             "fold_strength": group.get("FoldData", {}).get("iStrength"),
+            # CLO's bIsTurned flag as exported (in testing, CLO set it on the fold-over seam of a
+            # rod pocket; its exact meaning is undocumented)
             "turned": group.get("bIsTurned"),
+            "sewn_together": together,
             "sides": sides,
         })
 
