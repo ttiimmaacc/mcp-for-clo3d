@@ -531,28 +531,44 @@ std::map<std::string, Handler> BuildHandlers()
 		return Value::object().set("imported", ok).set("file_path", path).set("object_type", type)
 			.set("avatar_count_before", before).set("avatar_count", EXPORT_API->GetAvatarCount());
 	};
-	// Bounding box of all simulated cloth in 3D (mm), from GetClothPositions.
-	h["get_cloth_bounds"] = [](const Value&) {
+	// Bounding box of simulated cloth in 3D (mm), from GetClothPositions; optionally only the
+	// vertices inside a region box (e.g. a slice through the middle of a pocket).
+	h["get_cloth_bounds"] = [](const Value& p) {
+		float rmin[3] = {-1e9f, -1e9f, -1e9f}, rmax[3] = {1e9f, 1e9f, 1e9f};
+		const Value* regionMin = p.find("min");
+		const Value* regionMax = p.find("max");
+		for (int k = 0; k < 3; ++k)
+		{
+			if (regionMin && regionMin->type == Value::Array && regionMin->a.size() == 3)
+				rmin[k] = (float)regionMin->a[k].n;
+			if (regionMax && regionMax->type == Value::Array && regionMax->a.size() == 3)
+				rmax[k] = (float)regionMax->a[k].n;
+		}
 		std::vector<float> positions;
 		UTILITY_API->GetClothPositions(positions);
-		size_t n = positions.size() / 3;
-		if (n == 0)
-			return Value::object().set("vertex_count", 0);
-		float lo[3] = {positions[0], positions[1], positions[2]}, hi[3] = {lo[0], lo[1], lo[2]};
-		for (size_t i = 0; i < n; ++i)
+		size_t total = positions.size() / 3, n = 0;
+		float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+		for (size_t i = 0; i < total; ++i)
+		{
+			const float* v = &positions[i * 3];
+			if (v[0] < rmin[0] || v[0] > rmax[0] || v[1] < rmin[1] || v[1] > rmax[1] || v[2] < rmin[2] || v[2] > rmax[2])
+				continue;
+			++n;
 			for (int k = 0; k < 3; ++k)
 			{
-				float v = positions[i * 3 + k];
-				lo[k] = v < lo[k] ? v : lo[k];
-				hi[k] = v > hi[k] ? v : hi[k];
+				lo[k] = v[k] < lo[k] ? v[k] : lo[k];
+				hi[k] = v[k] > hi[k] ? v[k] : hi[k];
 			}
+		}
+		if (n == 0)
+			return Value::object().set("vertex_count", 0).set("total_vertices", (double)total);
 		Value mn = Value::array(), mx = Value::array();
 		for (int k = 0; k < 3; ++k)
 		{
 			mn.a.push_back(lo[k]);
 			mx.a.push_back(hi[k]);
 		}
-		return Value::object().set("vertex_count", (double)n).set("min", mn).set("max", mx);
+		return Value::object().set("vertex_count", (double)n).set("total_vertices", (double)total).set("min", mn).set("max", mx);
 	};
 	h["import_fabric"] = [](const Value& p) {
 		std::string path = p.str("file_path");

@@ -113,15 +113,52 @@ def view_patterns(pattern_index: int | None = None) -> list:
 
 
 @mcp.tool()
-def get_cloth_bounds() -> dict:
+def make_rod_pocket(
+    pattern_index: int,
+    pocket_depth: float = 150.0,
+    rod_diameter: float = 30.0,
+    rod_overhang: float = 200.0,
+    settle_steps: int = 150,
+) -> dict:
+    """Make a rod pocket along a panel's top edge and hang the panel on a rod (curtains,
+    banners, flags). The panel needs a straight, horizontal top edge.
+
+    Adds a pocket strip above the panel, sews it to the top edge and to a fold line, forms
+    the tube with the panel held still, measures the tube, puts a rod inside it and lets the
+    panel hang. Returns whether it hangs across the whole width. Save a checkpoint first;
+    look at the result with capture_3d.
+
+    Args:
+        pattern_index: The panel.
+        pocket_depth: Height of the pocket strip in mm (the tube is roughly 1.4x this around).
+        rod_diameter: Rod diameter in mm.
+        rod_overhang: How far the rod extends past each side of the panel, in mm.
+        settle_steps: Simulation steps after releasing the panel.
+    """
+    from clo3d_mcp.rod_pocket import make_rod_pocket as build
+
+    def send(command, params=None):
+        if command == "__add_rod__":
+            return add_rod(params["center"], params["length"], params["diameter"], "x")
+        return _send(command, params)
+
+    return build(send, pattern_index, pocket_depth, rod_diameter, rod_overhang, settle_steps)
+
+
+@mcp.tool()
+def get_cloth_bounds(region_min: list[float] | None = None, region_max: list[float] | None = None) -> dict:
     """3D bounding box (mm) of all cloth: min/max [x, y, z]. CLO's 3D axes: Y is up, Z points
     towards the front view camera, X to the avatar's left. Use it to place rods and props.
 
     CLO only reports cloth once it has been simulated, and reports nothing while every piece
     is frozen: run simulate(1) with at least one piece unfrozen first. A flat new piece lies
     at its 2D (x, y) coordinates in the plane z = 200.
+
+    Args:
+        region_min: Only count vertices inside this box: [x, y, z] lower corner.
+        region_max: Upper corner [x, y, z] of that box.
     """
-    return _send("get_cloth_bounds")
+    return _send("get_cloth_bounds", _given(min=region_min, max=region_max))
 
 
 @mcp.tool()
