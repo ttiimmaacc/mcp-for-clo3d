@@ -123,10 +123,11 @@ def make_rod_pocket(
     """Make a rod pocket along a panel's top edge and hang the panel on a rod (curtains,
     banners, flags). The panel needs a straight, horizontal top edge.
 
-    Adds a pocket strip above the panel, sews it to the top edge and to a fold line, forms
-    the tube with the panel held still, measures the tube, puts a rod inside it and lets the
-    panel hang. Returns whether it hangs across the whole width. Save a checkpoint first;
-    look at the result with capture_3d.
+    Adds a pocket strip above the panel, sews it to the top edge and to a fold line, holds the
+    panel still, places a rod just in front of the strip above the top edge (the folding strip
+    wraps it; verified in CLO 2025.2) and lets the panel hang. Returns whether the cloth stays
+    up at the ends and in the middle; the pocket can be fuller in places, so look at the result
+    with capture_3d. Save a checkpoint first.
 
     Args:
         pattern_index: The panel.
@@ -140,6 +141,8 @@ def make_rod_pocket(
     def send(command, params=None):
         if command == "__add_rod__":
             return add_rod(params["center"], params["length"], params["diameter"], "x")
+        if command == "__remove_object__":
+            return remove_collision_object(params["index"])
         return _send(command, params)
 
     return build(send, pattern_index, pocket_depth, rod_diameter, rod_overhang, settle_steps)
@@ -161,66 +164,119 @@ def get_cloth_bounds(region_min: list[float] | None = None, region_max: list[flo
     return _send("get_cloth_bounds", _given(min=region_min, max=region_max))
 
 
+# CLO keeps one avatar: importing an OBJ as an avatar replaces the previous one (verified in
+# 2025.2.236). So all rods and boxes live in one mesh, re-imported whenever a part changes.
+OBJECTS_MESH = "mcp_objects"
+
+
+def _objects_file(name):
+    return os.path.join(_work_dir("objects"), name)
+
+
+def _load_parts(replace_avatar: bool) -> list:
+    """The current parts, checked against what is actually in CLO's scene."""
+    avatars = _send("get_avatars")
+    if avatars["count"] == 0:
+        return []
+    names = [a.get("name") for a in avatars["avatars"]]
+    if names == [OBJECTS_MESH]:
+        try:
+            with open(_objects_file("parts.json"), encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return []
+    if replace_avatar:
+        return []
+    raise ValueError("the scene has the avatar %s. CLO keeps one avatar, so adding a collision "
+                     "object would replace it; pass replace_avatar=True to do that." % names)
+
+
+def _apply_parts(parts: list) -> dict:
+    from clo3d_mcp.shapes import combine_obj, part_obj
+    with open(_objects_file("parts.json"), "w", encoding="utf-8") as f:
+        json.dump(parts, f, indent=1)
+    if not parts:
+        if _send("get_avatars")["count"]:
+            _send("delete_objects", {"indices": [0]})
+        return {"objects": []}
+    path = _objects_file(OBJECTS_MESH + ".obj")
+    with open(path, "w") as f:
+        f.write(combine_obj([part_obj(p) for p in parts]))
+    result = _send("import_obj", {"file_path": path, "object_type": 0})
+    if not result.get("imported"):
+        raise RuntimeError("CLO did not import the collision mesh")
+    return {"objects": [dict(p, index=i) for i, p in enumerate(parts)]}
+
+
+def _add_part(part: dict, replace_avatar: bool) -> dict:
+    parts = _load_parts(replace_avatar) + [part]
+    result = _apply_parts(parts)
+    result["added_index"] = len(parts) - 1
+    return result
+
+
 @mcp.tool()
-def add_rod(center: list[float], length: float, diameter: float = 25.0, axis: str = "x") -> dict:
+def add_rod(center: list[float], length: float, diameter: float = 25.0, axis: str = "x",
+            replace_avatar: bool = False) -> dict:
     """Add a cylinder (curtain rod, rail, hanger bar...) that cloth collides with.
 
-    It is imported as a collision object (CLO treats it like an avatar), exactly at `center`.
-    Tested with a rod-pocket curtain in CLO 2025.2:
-    - Cloth passes through a thin rod unless its mesh is finer than the rod: set the pieces'
-      particle_distance to about a third of the diameter (set_pattern_state) and use >= 30 mm.
-    - Folding cloth is pushed away by the rod, so form a pocket first (panel frozen, no rod),
-      then add the rod inside the formed tube and unfreeze.
+    All rods and boxes form one collision object (CLO keeps a single avatar), placed exactly
+    at the given coordinates. For curtains, make_rod_pocket does the whole job. Tested in CLO
+    2025.2: cloth passes through a thin rod unless its mesh is finer than the rod, so set the
+    pieces' particle_distance to about a third of the diameter and use >= 30 mm.
 
     Args:
         center: [x, y, z] centre in mm (see get_cloth_bounds for where the cloth is).
         length: Length in mm.
         diameter: Diameter in mm.
         axis: Direction of the rod: "x" (left-right), "y" (up-down) or "z" (front-back).
+        replace_avatar: Allow replacing a human avatar in the scene.
     """
-    from clo3d_mcp.shapes import cylinder_obj
-    path = os.path.join(_work_dir("objects"), "rod_%d.obj" % int(time.time() * 1000))
-    with open(path, "w") as f:
-        f.write(cylinder_obj(center, length, diameter, axis))
-    result = _send("import_obj", {"file_path": path, "object_type": 0})
-    result.update({"center": center, "length": length, "diameter": diameter, "axis": axis})
-    return result
+    return _add_part({"kind": "rod", "center": center, "length": length, "diameter": diameter,
+                      "axis": axis}, replace_avatar)
 
 
 @mcp.tool()
-def add_box(center: list[float], size: list[float]) -> dict:
+def add_box(center: list[float], size: list[float], replace_avatar: bool = False) -> dict:
     """Add a box that cloth collides with (a table, shelf, bed or window sill...).
 
     Args:
         center: [x, y, z] centre in mm.
         size: [width_x, height_y, depth_z] in mm.
+        replace_avatar: Allow replacing a human avatar in the scene.
     """
-    from clo3d_mcp.shapes import box_obj
-    path = os.path.join(_work_dir("objects"), "box_%d.obj" % int(time.time() * 1000))
-    with open(path, "w") as f:
-        f.write(box_obj(center, size))
-    result = _send("import_obj", {"file_path": path, "object_type": 0})
-    result.update({"center": center, "size": size})
-    return result
+    return _add_part({"kind": "box", "center": center, "size": size}, replace_avatar)
+
+
+@mcp.tool()
+def list_collision_objects() -> dict:
+    """The rods and boxes currently in the scene, with the index remove_collision_object takes."""
+    return {"objects": [dict(p, index=i) for i, p in enumerate(_load_parts(False))]}
 
 
 @mcp.tool()
 def remove_collision_object(index: int) -> dict:
-    """Delete a collision object or avatar by index (see get_avatars; rods and boxes are listed
-    there in the order they were added)."""
-    return _send("delete_objects", {"indices": [index]})
+    """Remove one rod or box (index from list_collision_objects); the others stay."""
+    parts = _load_parts(False)
+    if not 0 <= index < len(parts):
+        raise ValueError("no collision object %d; there are %d" % (index, len(parts)))
+    del parts[index]
+    return _apply_parts(parts)
 
 
 @mcp.tool()
 def import_collision_object(file_path: str, keep_position: bool = True, scale: float = 1.0) -> dict:
     """Import your own OBJ (e.g. a modelled curtain rail or furniture) as an object cloth
-    collides with. Units are mm unless scale is set (e.g. 10 for a model in cm).
+    collides with. Units are mm unless scale is set (e.g. 10 for a model in cm). It replaces
+    the current avatar and any rods or boxes (CLO keeps a single avatar).
 
     Args:
         file_path: Absolute path to the .obj file.
         keep_position: Keep the file's coordinates (False: CLO drops it onto the ground).
         scale: Scale factor applied on import.
     """
+    with open(_objects_file("parts.json"), "w", encoding="utf-8") as f:
+        json.dump([], f)
     return _send("import_obj", {"file_path": file_path, "object_type": 0,
                                 "align_to_ground": not keep_position, "scale": scale})
 

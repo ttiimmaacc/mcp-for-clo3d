@@ -40,6 +40,28 @@ def cylinder_obj(center, length, diameter, axis="x", segments=32):
     return "\n".join(lines) + "\n"
 
 
+def combine_obj(parts):
+    """One OBJ holding several meshes (CLO keeps a single avatar, so objects share one mesh)."""
+    out, offset = ["# combined collision objects"], 0
+    for text in parts:
+        verts = [l for l in text.splitlines() if l.startswith("v ")]
+        out += verts
+        for line in text.splitlines():
+            if line.startswith("f "):
+                out.append("f " + " ".join(str(int(i) + offset) for i in line.split()[1:]))
+        offset += len(verts)
+    return "\n".join(out) + "\n"
+
+
+def part_obj(part):
+    """OBJ text for a stored part: {"kind": "rod"|"box", ...}."""
+    if part["kind"] == "rod":
+        return cylinder_obj(part["center"], part["length"], part["diameter"], part.get("axis", "x"))
+    if part["kind"] == "box":
+        return box_obj(part["center"], part["size"])
+    raise ValueError("unknown part kind %r" % part["kind"])
+
+
 def box_obj(center, size):
     """OBJ text for an axis-aligned box with the given [x, y, z] size."""
     if any(s <= 0 for s in size):

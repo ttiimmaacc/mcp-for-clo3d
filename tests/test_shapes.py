@@ -42,3 +42,15 @@ def test_bad_input():
         cylinder_obj([0, 0, 0], 100, 10, axis="w")
     with pytest.raises(ValueError):
         box_obj([0, 0, 0], [1, 0, 1])
+
+
+def test_combined_mesh_keeps_each_part_closed_and_indexed():
+    from clo3d_mcp.shapes import combine_obj, part_obj
+    rod = {"kind": "rod", "center": [0, 1500, 180], "length": 1000, "diameter": 30}
+    box = {"kind": "box", "center": [0, 400, 0], "size": [800, 20, 500]}
+    verts, faces = _parse(combine_obj([part_obj(rod), part_obj(box)]))
+    n_rod = len(_parse(part_obj(rod))[0])
+    assert len(verts) == n_rod + 8
+    assert all(1 <= i <= len(verts) for f in faces for i in f)
+    assert _closed(faces)
+    assert max(i for f in faces[-6:] for i in f) == len(verts)  # box faces point at box vertices

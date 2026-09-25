@@ -117,6 +117,8 @@ Then ask things like *"What's in this project?"*, *"Create a rectangle pattern 4
 |------|-------|
 | Scene | `get_project_info`, `new_project`, `open_file`, `save_project`, `get_garment_info`, `import_file` |
 | See the result | `capture_3d`: the 3D window from front, back, sides, 3/4 or top, returned to the assistant as images, optionally with CLO's `strain` or `stress` fit map. `view_patterns`: picture of the 2D pieces with every line numbered and seams coloured. `set_fit_map` |
+| Collision objects | `add_rod`, `add_box`, `list_collision_objects`, `remove_collision_object`, `import_collision_object`, `get_cloth_bounds`. CLO keeps one avatar, so rods and boxes share one collision mesh, and they won't replace a human avatar unless asked |
+| Rod pockets | `make_rod_pocket`: sews a pocket along a panel's top edge and hangs it on a rod (curtains, banners). Verified live: a 1000 × 1500 mm panel hangs across its full width |
 | Checkpoints | `save_checkpoint`, `list_checkpoints`, `restore_checkpoint`: CLO's API has no undo, so save the scene before risky edits and reopen it if something goes wrong |
 | Geometry | `get_pattern_geometry`: pieces with numbered outline lines (length, endpoints), internal shapes, and every seam mapped to the lines it uses |
 | Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `mirror_pattern`, `unfold_pattern`, `move_pattern_2d` |

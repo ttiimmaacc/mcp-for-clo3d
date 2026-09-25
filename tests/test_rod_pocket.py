@@ -2,7 +2,7 @@
 
 import pytest
 
-from clo3d_mcp.rod_pocket import find_top_edge, tube_center
+from clo3d_mcp.rod_pocket import find_top_edge, placements
 
 
 def _line(i, a, b, curved=False):
@@ -22,17 +22,11 @@ def test_top_edge_requires_straight_horizontal_line():
         find_top_edge({"lines": [_line(0, (0, 0), (0, 100))]})
 
 
-def _slice(top, far_z):
-    return {"min": [0, 1400, min(203, far_z)], "max": [0, top, max(203, far_z)]}
+def test_rod_in_front_of_the_strip_above_the_top_edge():
+    rod_y, rod_z = placements(top_y=1500, fold_y=1440, plane_z=200, pocket_depth=150, rod_diameter=30)
+    assert rod_y == 1525 and rod_z == 218
 
 
-def test_rod_centre_between_fold_and_tube_top_on_the_tube_side():
-    y, z, clearance = tube_center([_slice(1560, 260), _slice(1550, 250), _slice(1560, 260)],
-                                  plane_z=200, fold_y=1440, rod_diameter=30)
-    assert 1490 < y < 1505 and 225 < z < 230
-    assert clearance == pytest.approx(50)
-
-
-def test_rod_that_does_not_fit_is_rejected():
-    with pytest.raises(ValueError, match="does not fit"):
-        tube_center([_slice(1470, 220)], plane_z=200, fold_y=1440, rod_diameter=30)
+def test_pocket_too_small_is_rejected_with_a_suggestion():
+    with pytest.raises(ValueError, match="pocket_depth >="):
+        placements(top_y=1500, fold_y=1460, plane_z=200, pocket_depth=60, rod_diameter=40)
