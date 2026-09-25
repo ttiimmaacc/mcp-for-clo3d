@@ -116,6 +116,8 @@ Then ask things like *"What's in this project?"*, *"Create a rectangle pattern 4
 | Area | Tools |
 |------|-------|
 | Scene | `get_project_info`, `new_project`, `open_file`, `save_project`, `get_garment_info`, `import_file` |
+| See the result | `capture_3d`: the 3D window from front, back, sides, 3/4 or top, returned to the assistant as images, optionally with CLO's `strain` or `stress` fit map. `view_patterns`: picture of the 2D pieces with every line numbered and seams coloured. `set_fit_map` |
+| Checkpoints | `save_checkpoint`, `list_checkpoints`, `restore_checkpoint`: CLO's API has no undo, so save the scene before risky edits and reopen it if something goes wrong |
 | Geometry | `get_pattern_geometry`: pieces with numbered outline lines (length, endpoints), internal shapes, and every seam mapped to the lines it uses |
 | Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `mirror_pattern`, `unfold_pattern`, `move_pattern_2d` |
 | Sewing | `sew_lines` (outline or internal-shape lines), `add_topstitch`, `list_topstitch_styles`, `set_seam_taping` |
@@ -129,7 +131,7 @@ Then ask things like *"What's in this project?"*, *"Create a rectangle pattern 4
 | Simulation | `simulate`, `set_simulation_quality` |
 | Colorways | `get_colorways`, `set_current_colorway` |
 
-Line-based tools take the line indices that `get_pattern_geometry` returns. The plug-in checks
+Line-based tools take the line indices that `get_pattern_geometry` (or the `view_patterns` picture) shows. Checkpoints are saved next to the request files. CLO saves them like "Save As", so its open file becomes the checkpoint copy; `save_checkpoint` returns the original path to save back to. Restoring a large scene (avatar plus simulation data) can take a few minutes. The plug-in checks
 every pattern and line index before calling CLO, because CLO doesn't check them. Line-creating
 tools report how many internal shapes CLO actually created, because CLO creates nothing, without
 an error, for requests it can't do.
