@@ -7,11 +7,15 @@ Communicates with the native CLO plug-in (cpp_plugin/) through a shared file dir
 
 from mcp.server.fastmcp import FastMCP
 from clo3d_mcp.connection import get_connection, CLO3DConnectionError
+from clo3d_mcp.geometry import summarize
 
 mcp = FastMCP(
     "clo3d",
     instructions="Control CLO3D — the industry-standard 3D garment design software. "
-    "Create patterns, manage fabrics, run simulations, export 3D models, and more.",
+    "Create patterns, manage fabrics, run simulations, export 3D models, and more. "
+    "Lines are addressed by index: call get_pattern_geometry first to see each piece's "
+    "numbered outline lines, internal shapes and existing seams before sewing, adding "
+    "elastic, topstitch or seam taping. Pattern coordinates are millimetres in the 2D window.",
 )
 
 
@@ -19,6 +23,11 @@ def _send(command: str, params: dict | None = None) -> dict:
     """Send a command to CLO3D and return the result."""
     conn = get_connection()
     return conn.send_command(command, params)
+
+
+def _given(**params) -> dict:
+    """Drop parameters the caller left unset."""
+    return {k: v for k, v in params.items() if v is not None}
 
 
 # ─── Scene Tools ───────────────────────────────────────────────────────────
@@ -373,3 +382,359 @@ def set_current_colorway(colorway_index: int) -> dict:
         colorway_index: Zero-based index of the colorway to activate.
     """
     return _send("set_current_colorway", {"colorway_index": colorway_index})
+
+
+# ─── Geometry & Seams ─────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_pattern_geometry(pattern_index: int | None = None, include_points: bool = False) -> dict:
+    """Get pattern pieces with numbered outline lines, internal shapes and all seams.
+
+    Use this before sewing or editing lines: every line-based tool takes the `line_index`
+    values listed here. Each line has its length (mm) and start/end points in 2D pattern
+    coordinates. Each seam lists, for both sides, the pattern, optional internal shape and the
+    lines it covers (coverage 1.0 = whole line).
+
+    Args:
+        pattern_index: Only return this piece and the seams touching it (default: all).
+        include_points: Also return every point of every line (larger output).
+    """
+    return summarize(_send("get_pattern_geometry"), pattern_index, include_points)
+
+
+@mcp.tool()
+def sew_lines(
+    pattern_a: int,
+    line_a: int,
+    pattern_b: int,
+    line_b: int,
+    direction_a: bool = True,
+    direction_b: bool = True,
+    internal_shape_a: int | None = None,
+    internal_shape_b: int | None = None,
+) -> dict:
+    """Sew one line to another (segment sewing). Get line indices from get_pattern_geometry.
+
+    If the seam comes out twisted, sew it again with one direction flipped.
+
+    Args:
+        pattern_a: Pattern index of side A.
+        line_a: Line index on side A (outline line, or line of internal_shape_a).
+        pattern_b: Pattern index of side B.
+        line_b: Line index on side B (outline line, or line of internal_shape_b).
+        direction_a: Stitch direction along line A (True = forward).
+        direction_b: Stitch direction along line B (True = forward).
+        internal_shape_a: Sew a line of this internal shape on A instead of the outline.
+        internal_shape_b: Sew a line of this internal shape on B instead of the outline.
+    """
+    return _send("sew_lines", _given(
+        pattern_a=pattern_a, line_a=line_a, pattern_b=pattern_b, line_b=line_b,
+        direction_a=direction_a, direction_b=direction_b,
+        internal_shape_a=internal_shape_a, internal_shape_b=internal_shape_b))
+
+
+@mcp.tool()
+def list_topstitch_styles() -> dict:
+    """List the topstitch styles in the project, for add_topstitch's style_index."""
+    return _send("list_topstitch_styles")
+
+
+@mcp.tool()
+def add_topstitch(
+    style_index: int,
+    seam_index: int | None = None,
+    start_ratio: float = 0.0,
+    end_ratio: float = 1.0,
+    pattern_index: int | None = None,
+    line_index: int | None = None,
+) -> dict:
+    """Add topstitching either along a seam or along one pattern line.
+
+    Args:
+        style_index: Topstitch style from list_topstitch_styles.
+        seam_index: Topstitch this seam (from get_pattern_geometry).
+        start_ratio: Where along the seam to start (0-1), with seam_index.
+        end_ratio: Where along the seam to end (0-1), with seam_index.
+        pattern_index: Topstitch a line of this pattern instead of a seam.
+        line_index: The line to topstitch, with pattern_index.
+    """
+    return _send("add_topstitch", _given(
+        style_index=style_index, seam_index=seam_index, start_ratio=start_ratio,
+        end_ratio=end_ratio, pattern_index=pattern_index, line_index=line_index))
+
+
+@mcp.tool()
+def set_seam_taping(pattern_index: int, line_index: int, enabled: bool = True) -> dict:
+    """Turn seam taping on or off for one outline line of a pattern."""
+    return _send("set_seam_taping", {"pattern_index": pattern_index, "line_index": line_index, "enabled": enabled})
+
+
+# ─── Piece State ───────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def set_pattern_state(
+    pattern_index: int,
+    frozen: bool | None = None,
+    strengthened: bool | None = None,
+    solidified: bool | None = None,
+    solidify_strength: float | None = None,
+    hidden_3d: bool | None = None,
+    layer: int | None = None,
+    particle_distance: float | None = None,
+    grain_degrees: float | None = None,
+) -> dict:
+    """Set simulation state of a pattern piece. Only the values you pass are changed.
+
+    CLO's API cannot place pins; freeze or strengthen a piece to hold it in place instead.
+
+    Args:
+        pattern_index: Pattern to change.
+        frozen: Freeze (excluded from simulation, stays where it is).
+        strengthened: Strengthen (stiffer, holds shape).
+        solidified: Solidify.
+        solidify_strength: Solidify strength.
+        hidden_3d: Hide the piece in the 3D window.
+        layer: Layer number (higher layers sit on top in collisions).
+        particle_distance: Mesh particle distance in mm (smaller = finer mesh, slower).
+        grain_degrees: Grainline direction in degrees.
+    """
+    return _send("set_pattern_state", _given(
+        pattern_index=pattern_index, frozen=frozen, strengthened=strengthened, solidified=solidified,
+        solidify_strength=solidify_strength, hidden_3d=hidden_3d, layer=layer,
+        particle_distance=particle_distance, grain_degrees=grain_degrees))
+
+
+@mcp.tool()
+def get_pattern_state(pattern_index: int) -> dict:
+    """Get a piece's layer, solidify state, grain direction, shrinkage and 3D arrangement."""
+    return _send("get_pattern_state", {"pattern_index": pattern_index})
+
+
+@mcp.tool()
+def remove_all_pins() -> dict:
+    """Remove every pin in the scene. (CLO's API can remove pins but not create them.)"""
+    return _send("remove_all_pins")
+
+
+# ─── 3D Placement ──────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_arrangement_points() -> dict:
+    """List the avatar's arrangement points (needs an avatar in the scene) for place_pattern."""
+    return _send("get_arrangement_points")
+
+
+@mcp.tool()
+def place_pattern(
+    pattern_index: int,
+    arrangement_index: int | None = None,
+    orientation: int | None = None,
+    position_x: int | None = None,
+    position_y: int | None = None,
+    offset: int | None = None,
+    shape_style: str | None = None,
+) -> dict:
+    """Place a pattern piece in 3D on an avatar arrangement point.
+
+    CLO's API has no free XYZ move/rotate; placement goes through arrangement points.
+    Run simulate afterwards to drape.
+
+    Args:
+        pattern_index: Pattern to place.
+        arrangement_index: Arrangement point from get_arrangement_points.
+        orientation: Orientation value for the piece on the point.
+        position_x: Position on the arrangement surface (set together with position_y/offset).
+        position_y: Position on the arrangement surface.
+        offset: Distance from the arrangement surface.
+        shape_style: "Flat" or "Curved" (wrap around the body).
+    """
+    return _send("place_pattern", _given(
+        pattern_index=pattern_index, arrangement_index=arrangement_index, orientation=orientation,
+        position_x=position_x, position_y=position_y, offset=offset, shape_style=shape_style))
+
+
+@mcp.tool()
+def reset_arrangement() -> dict:
+    """Reset all pieces to their arrangement positions (undo draping)."""
+    return _send("reset_arrangement")
+
+
+@mcp.tool()
+def move_pattern_2d(
+    pattern_index: int,
+    x: float | None = None,
+    y: float | None = None,
+    dx: float | None = None,
+    dy: float | None = None,
+) -> dict:
+    """Move a piece in the 2D pattern window: to (x, y), or by (dx, dy)."""
+    return _send("move_pattern_2d", _given(pattern_index=pattern_index, x=x, y=y, dx=dx, dy=dy))
+
+
+# ─── Lines & Shapes ────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def add_internal_shape(pattern_index: int, points: list[list[float]], closed: bool = False) -> dict:
+    """Draw an internal line or shape on a pattern (fold lines, darts, pocket placement...).
+
+    Args:
+        pattern_index: Pattern to draw on.
+        points: [[x, y], ...] or [[x, y, type], ...] in pattern coordinates (mm);
+            type 0 = straight, 2 = spline curve, 3 = bezier curve.
+        closed: Connect the last point back to the first.
+    """
+    return _send("add_internal_shape", {"pattern_index": pattern_index, "points": points, "closed": closed})
+
+
+@mcp.tool()
+def offset_internal_line(
+    pattern_index: int, line_index: int, distance: float, count: int = 1,
+    reverse: bool = False, extend: bool = False,
+) -> dict:
+    """Create internal lines parallel to an outline line (e.g. hem fold or pleat lines).
+
+    Args:
+        pattern_index: Pattern to draw on.
+        line_index: Outline line to offset from.
+        distance: Distance between lines in mm.
+        count: Number of lines to create.
+        reverse: Offset to the other side.
+        extend: Extend the new lines to the piece outline.
+    """
+    return _send("offset_internal_line", {
+        "pattern_index": pattern_index, "line_index": line_index, "distance": distance,
+        "count": count, "reverse": reverse, "extend": extend})
+
+
+@mcp.tool()
+def distribute_internal_lines(
+    pattern_index: int, line_indices: list[int], count: int,
+    straight: bool = True, perpendicular: bool = False, graduate: bool = False,
+) -> dict:
+    """Distribute evenly spaced internal lines between outline lines (e.g. pleat or gather lines).
+
+    Args:
+        pattern_index: Pattern to draw on.
+        line_indices: Outline lines to distribute between (at least two).
+        count: Number of lines.
+        straight: Straight lines instead of curves.
+        perpendicular: Perpendicular to the segments.
+        graduate: Graduate the spacing along the segments.
+    """
+    return _send("distribute_internal_lines", {
+        "pattern_index": pattern_index, "line_indices": line_indices, "count": count,
+        "straight": straight, "perpendicular": perpendicular, "graduate": graduate})
+
+
+@mcp.tool()
+def convert_shape(pattern_index: int, internal_shape: int, to: str) -> dict:
+    """Convert an internal shape to a base line ("base") or back ("internal")."""
+    return _send("convert_shape", {"pattern_index": pattern_index, "internal_shape": internal_shape, "to": to})
+
+
+@mcp.tool()
+def move_point(pattern_index: int, point_index: int, x: float, y: float) -> dict:
+    """Move an outline point to (x, y). Point n is the start point of line n."""
+    return _send("move_point", {"pattern_index": pattern_index, "point_index": point_index, "x": x, "y": y})
+
+
+@mcp.tool()
+def delete_point(pattern_index: int, point_index: int) -> dict:
+    """Delete an outline point (point n is the start point of line n)."""
+    return _send("delete_point", {"pattern_index": pattern_index, "point_index": point_index})
+
+
+@mcp.tool()
+def delete_line(pattern_index: int, line_index: int) -> dict:
+    """Delete an outline line of a pattern."""
+    return _send("delete_line", {"pattern_index": pattern_index, "line_index": line_index})
+
+
+@mcp.tool()
+def mirror_pattern(pattern_index: int, with_sewing: bool = True) -> dict:
+    """Create a symmetric (mirrored, linked) copy of a piece, optionally copying its sewing."""
+    return _send("mirror_pattern", {"pattern_index": pattern_index, "with_sewing": with_sewing})
+
+
+@mcp.tool()
+def unfold_pattern(pattern_index: int, line_index: int, half_symmetry: bool = False) -> dict:
+    """Unfold a half pattern across one of its lines (e.g. the centre-front fold line)."""
+    return _send("unfold_pattern", {"pattern_index": pattern_index, "line_index": line_index, "half_symmetry": half_symmetry})
+
+
+# ─── Elastic & Shrinkage ───────────────────────────────────────────────────
+
+
+@mcp.tool()
+def set_elastic(
+    pattern_index: int,
+    line_index: int = -1,
+    enabled: bool | None = None,
+    strength: float | None = None,
+    ratio: int | None = None,
+    segment_length: float | None = None,
+    total_length: float | None = None,
+) -> dict:
+    """Set elastic on a pattern line (or all lines with line_index=-1). Only passed values change.
+
+    Args:
+        pattern_index: Pattern to change.
+        line_index: Outline line, or -1 for every line.
+        enabled: Elastic on/off.
+        strength: Elastic strength.
+        ratio: Elastic strength ratio in percent.
+        segment_length: Elastic segment length in mm.
+        total_length: Elastic total length in mm.
+    """
+    return _send("set_elastic", _given(
+        pattern_index=pattern_index, line_index=line_index, enabled=enabled, strength=strength,
+        ratio=ratio, segment_length=segment_length, total_length=total_length))
+
+
+@mcp.tool()
+def set_shrinkage(pattern_index: int, width_percent: float | None = None, height_percent: float | None = None) -> dict:
+    """Set a piece's fabric shrinkage percentages in width (weft) and/or height (warp)."""
+    return _send("set_shrinkage", _given(
+        pattern_index=pattern_index, width_percent=width_percent, height_percent=height_percent))
+
+
+# ─── Simulation, Avatar & Housekeeping ─────────────────────────────────────
+
+
+@mcp.tool()
+def set_simulation_quality(quality: int, simulation_mode: int | None = None) -> dict:
+    """Set the simulation preset: 0 Normal, 1 Animation (stable), 2 Fitting (accurate), 3 FAST (GPU).
+
+    Args:
+        quality: Preset index.
+        simulation_mode: 0 CPU, 1 GPU (defaults to GPU for preset 3, CPU otherwise).
+    """
+    return _send("set_simulation_quality", _given(quality=quality, simulation_mode=simulation_mode))
+
+
+@mcp.tool()
+def get_avatars() -> dict:
+    """List avatars in the scene with names and genders."""
+    return _send("get_avatars")
+
+
+@mcp.tool()
+def import_avatar(file_path: str, apf_path: str = "") -> dict:
+    """Load an avatar (.avt, .avac) into the scene, optionally with an arrangement file (.apf)."""
+    return _send("import_avatar", {"file_path": file_path, "apf_path": apf_path})
+
+
+@mcp.tool()
+def show_avatar(show: bool = True) -> dict:
+    """Show or hide the avatar."""
+    return _send("show_hide_avatar", {"show": show})
+
+
+@mcp.tool()
+def delete_fabric(fabric_index: int) -> dict:
+    """Delete a fabric from the project."""
+    return _send("delete_fabric", {"fabric_index": fabric_index})

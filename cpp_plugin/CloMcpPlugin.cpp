@@ -169,6 +169,64 @@ unsigned int U(const Value& p, const char* key) { return (unsigned int)p.num(key
 int I(const Value& p, const char* key) { return (int)p.num(key); }
 int I(const Value& p, const char* key, int def) { return (int)p.num(key, def); }
 
+// CLO does not validate indices and can crash on bad ones, so every index is checked first.
+int PatternIndex(const Value& p, const char* key = "pattern_index")
+{
+	int index = I(p, key);
+	int count = PATTERN_API->GetPatternCount();
+	if (index < 0 || index >= count)
+		throw std::runtime_error(std::string(key) + " " + std::to_string(index) + " is out of range (" +
+								 std::to_string(count) + " patterns)");
+	return index;
+}
+
+// Number of lines in a pattern's outline (child == -1) or in one of its internal shapes.
+// GetLineLength returns 0 past the last line.
+int LineCount(int pattern, int child = -1)
+{
+	int n = 0;
+	while (n < 2000 && (child < 0 ? PATTERN_API->GetLineLength(pattern, n) : PATTERN_API->GetLineLength(pattern, child, n)) > 0.0f)
+		++n;
+	return n;
+}
+
+int LineIndex(const Value& p, int pattern, const char* key = "line_index", bool allowAll = false)
+{
+	int line = I(p, key, allowAll ? -1 : -2);
+	if (allowAll && line == -1)
+		return -1;
+	int count = LineCount(pattern);
+	if (line < 0 || line >= count)
+		throw std::runtime_error(std::string(key) + " " + std::to_string(line) + " is out of range (pattern " +
+								 std::to_string(pattern) + " has " + std::to_string(count) + " outline lines)");
+	return line;
+}
+
+std::vector<std::tuple<float, float, int>> Points(const Value& p)
+{
+	const Value* pts = p.find("points");
+	if (!pts || pts->type != Value::Array || pts->a.size() < 2)
+		throw std::runtime_error("'points' must be a list of at least two [x, y] or [x, y, type] entries");
+	std::vector<std::tuple<float, float, int>> points;
+	for (const Value& pt : pts->a)
+	{
+		if (pt.type != Value::Array || pt.a.size() < 2)
+			throw std::runtime_error("each point must be [x, y] or [x, y, type]");
+		points.emplace_back((float)pt.a[0].n, (float)pt.a[1].n, pt.a.size() > 2 ? (int)pt.a[2].n : 0);
+	}
+	return points;
+}
+
+std::wstring Widen(const std::string& s)
+{
+	if (s.empty())
+		return L"";
+	int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+	std::wstring w(len, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], len);
+	return w;
+}
+
 // ---------------------------------------------------------------------------
 // Command handlers (same names, params and results as plugin/clo3d_mcp_plugin.py)
 
@@ -468,6 +526,295 @@ std::map<std::string, Handler> BuildHandlers()
 	};
 	h["get_avatar_genders"] = [](const Value&) {
 		return Value::object().set("genders", Value::from(EXPORT_API->GetAvatarGenderList()));
+	};
+
+	// -- Geometry --
+	// Full pattern export (outlines, internal shapes, notches, seams) plus exact line lengths,
+	// which the server turns into line-indexed pieces and seams.
+	h["get_pattern_geometry"] = [](const Value&) {
+		std::string path = Narrow(CommFile(L"pattern_export.json"));
+		if (!PATTERN_API->ExportPatternJSON(path))
+			throw std::runtime_error("ExportPatternJSON failed");
+		std::string text;
+		bool read = ReadAll(Widen(path), text);
+		DeleteFileW(Widen(path).c_str());
+		if (!read)
+			throw std::runtime_error("could not read the pattern export");
+		Value exported = mj::parse(text);
+		Value lengths = Value::array();
+		int count = PATTERN_API->GetPatternCount();
+		for (int i = 0; i < count; ++i)
+		{
+			Value piece = Value::object();
+			Value outline = Value::array();
+			for (int l = 0, n = LineCount(i); l < n; ++l)
+				outline.a.push_back(PATTERN_API->GetLineLength(i, l));
+			piece.set("outline", outline);
+			Value children = Value::array();
+			const Value* list = exported.find("PatternList");
+			const Value* internal = (list && i < (int)list->a.size()) ? list->a[i].find("InternalLineList") : nullptr;
+			int childCount = internal ? (int)internal->a.size() : 0;
+			for (int c = 0; c < childCount; ++c)
+			{
+				Value lines = Value::array();
+				for (int l = 0, n = LineCount(i, c); l < n; ++l)
+					lines.a.push_back(PATTERN_API->GetLineLength(i, c, l));
+				children.a.push_back(lines);
+			}
+			piece.set("internal_shapes", children);
+			lengths.a.push_back(piece);
+		}
+		Value seamNames = Value::array();
+		for (int s = 0, n = PATTERN_API->GetSeamlinePairGroupCount(); s < n; ++s)
+			seamNames.a.push_back(PATTERN_API->GetSeamlinePairGroupName(s));
+		return Value::object().set("export", exported).set("line_lengths", lengths).set("seam_names", seamNames);
+	};
+
+	// -- Sewing --
+	h["sew_lines"] = [](const Value& p) {
+		int a = PatternIndex(p, "pattern_a"), b = PatternIndex(p, "pattern_b");
+		bool dirA = p.boolean("direction_a", true), dirB = p.boolean("direction_b", true);
+		bool childA = p.has("internal_shape_a"), childB = p.has("internal_shape_b");
+		int lineA = I(p, "line_a"), lineB = I(p, "line_b");
+		int before = PATTERN_API->GetSeamlinePairGroupCount();
+		bool ok;
+		if (!childA && !childB)
+		{
+			LineIndex(p, a, "line_a");
+			LineIndex(p, b, "line_b");
+			ok = PATTERN_API->AddSeamlinePairGroup(a, lineA, b, lineB, dirA, dirB);
+		}
+		else if (!childA)
+		{
+			int cB = I(p, "internal_shape_b");
+			if (lineB < 0 || lineB >= LineCount(b, cB))
+				throw std::runtime_error("line_b is out of range for internal_shape_b");
+			LineIndex(p, a, "line_a");
+			ok = PATTERN_API->AddSeamlinePairGroup(a, lineA, b, cB, lineB, dirA, dirB);
+		}
+		else
+		{
+			int cA = I(p, "internal_shape_a"), cB = I(p, "internal_shape_b", -1);
+			if (lineA < 0 || lineA >= LineCount(a, cA))
+				throw std::runtime_error("line_a is out of range for internal_shape_a");
+			if (lineB < 0 || lineB >= LineCount(b, cB))
+				throw std::runtime_error("line_b is out of range");
+			ok = PATTERN_API->AddSeamlinePairGroup(a, cA, lineA, b, cB, lineB, dirA, dirB);
+		}
+		int after = PATTERN_API->GetSeamlinePairGroupCount();
+		Value r = Value::object().set("sewn", ok && after > before).set("seam_count", after);
+		if (after > before)
+			r.set("seam_index", after - 1).set("seam_name", PATTERN_API->GetSeamlinePairGroupName(after - 1));
+		return r;
+	};
+	h["list_topstitch_styles"] = [](const Value&) {
+		return Value::object().set("styles", Value::from(PATTERN_API->GetTopstitchStyleList()));
+	};
+	h["add_topstitch"] = [](const Value& p) {
+		int style = I(p, "style_index");
+		bool ok;
+		if (p.has("seam_index"))
+		{
+			int seam = I(p, "seam_index");
+			if (seam < 0 || seam >= PATTERN_API->GetSeamlinePairGroupCount())
+				throw std::runtime_error("seam_index is out of range");
+			ok = PATTERN_API->AddSeamlineTopstitch((unsigned int)seam, (float)p.num("start_ratio", 0.0),
+												   (float)p.num("end_ratio", 1.0), style);
+		}
+		else
+		{
+			int pattern = PatternIndex(p);
+			ok = PATTERN_API->AddSegmentTopstitch(pattern, LineIndex(p, pattern), style);
+		}
+		return Value::object().set("added", ok);
+	};
+	h["set_seam_taping"] = [](const Value& p) {
+		int pattern = PatternIndex(p), line = LineIndex(p, pattern);
+		bool on = p.boolean("enabled", true);
+		PATTERN_API->SetPatternPieceSeamtaping(pattern, line, on);
+		return Value::object().set("pattern_index", pattern).set("line_index", line).set("seam_taping", on);
+	};
+
+	// -- Piece state --
+	h["set_pattern_state"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		Value r = Value::object().set("pattern_index", pattern);
+		if (p.has("frozen")) { bool v = p.boolean("frozen", false); PATTERN_API->SetPatternFreeze(pattern, v); r.set("frozen", v); }
+		if (p.has("strengthened")) { bool v = p.boolean("strengthened", false); PATTERN_API->SetPatternStrengthen(pattern, v); r.set("strengthened", v); }
+		if (p.has("solidified")) { bool v = p.boolean("solidified", false); PATTERN_API->SetPatternPieceSolidify(pattern, v); r.set("solidified", v); }
+		if (p.has("solidify_strength")) { float v = (float)p.num("solidify_strength"); PATTERN_API->SetPatternPieceSolidifyStrengthen(pattern, v); r.set("solidify_strength", v); }
+		if (p.has("hidden_3d")) { bool v = p.boolean("hidden_3d", false); PATTERN_API->SetPatternHide3D(pattern, v); r.set("hidden_3d", v); }
+		if (p.has("layer")) { int v = I(p, "layer"); PATTERN_API->SetPatternLayer(pattern, v); r.set("layer", v); }
+		if (p.has("particle_distance")) { float v = (float)p.num("particle_distance"); PATTERN_API->SetParticleDistanceOfPattern(pattern, v); r.set("particle_distance", v); }
+		if (p.has("grain_degrees")) { float v = (float)p.num("grain_degrees"); PATTERN_API->SetPatternPieceGrainDirection(pattern, v); r.set("grain_degrees", v); }
+		if (r.o.size() == 1)
+			throw std::runtime_error("no state given; pass frozen, strengthened, solidified, solidify_strength, hidden_3d, layer, particle_distance or grain_degrees");
+		return r;
+	};
+	h["get_pattern_state"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		return Value::object()
+			.set("pattern_index", pattern)
+			.set("layer", PATTERN_API->GetPatternLayer(pattern))
+			.set("solidified", PATTERN_API->IsPatternPieceSolidify(pattern))
+			.set("solidify_strength", PATTERN_API->GetPatternPieceSolidifyStrengthen(pattern))
+			.set("grain_degrees", PATTERN_API->GetPatternPieceGrainDirection(pattern))
+			.set("shrinkage", Value::from(PATTERN_API->GetShrinkagePercentage(pattern)))
+			.set("arrangement", Value::from(PATTERN_API->GetArrangementOfPattern(pattern)));
+	};
+	h["remove_all_pins"] = [](const Value&) {
+		int before = PATTERN_API->GetPinListSize();
+		bool ok = PATTERN_API->RemoveAllPins();
+		return Value::object().set("removed", ok).set("pins_before", before).set("pins_after", PATTERN_API->GetPinListSize());
+	};
+
+	// -- 3D placement --
+	h["get_arrangement_points"] = [](const Value&) {
+		std::vector<std::map<std::string, std::string>> list = PATTERN_API->GetArrangementList();
+		Value points = Value::array();
+		for (size_t i = 0; i < list.size(); ++i)
+		{
+			Value item = Value::from(list[i]);
+			item.set("arrangement_index", (int)i);
+			points.a.push_back(item);
+		}
+		return Value::object().set("arrangement_points", points).set("count", (int)list.size());
+	};
+	h["place_pattern"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		Value r = Value::object().set("pattern_index", pattern);
+		if (p.has("arrangement_index"))
+		{
+			int index = I(p, "arrangement_index");
+			int count = (int)PATTERN_API->GetArrangementList().size();
+			if (index < 0 || index >= count)
+				throw std::runtime_error("arrangement_index is out of range (" + std::to_string(count) +
+										 " arrangement points; load an avatar to get them)");
+			PATTERN_API->SetArrangement(pattern, index);
+			r.set("arrangement_index", index);
+		}
+		if (p.has("orientation")) { int v = I(p, "orientation"); PATTERN_API->SetArrangementOrientation(pattern, v); r.set("orientation", v); }
+		if (p.has("position_x") || p.has("position_y") || p.has("offset"))
+		{
+			int x = I(p, "position_x", 0), y = I(p, "position_y", 0), offset = I(p, "offset", 0);
+			PATTERN_API->SetArrangementPosition(pattern, x, y, offset);
+			r.set("position_x", x).set("position_y", y).set("offset", offset);
+		}
+		if (p.has("shape_style"))
+		{
+			std::string style = p.str("shape_style");
+			if (style != "Flat" && style != "Curved")
+				throw std::runtime_error("shape_style must be \"Flat\" or \"Curved\"");
+			PATTERN_API->SetArrangementShapeStyle(pattern, style);
+			r.set("shape_style", style);
+		}
+		r.set("arrangement", Value::from(PATTERN_API->GetArrangementOfPattern(pattern)));
+		return r;
+	};
+	h["reset_arrangement"] = [](const Value&) {
+		UTILITY_API->ResetClothArrangement();
+		return Value::object().set("reset", true);
+	};
+	h["move_pattern_2d"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		if (p.has("x") || p.has("y"))
+			PATTERN_API->SetPatternPiecePos(pattern, (float)p.num("x", 0), (float)p.num("y", 0));
+		else
+			PATTERN_API->SetPatternPieceMove(pattern, (float)p.num("dx", 0), (float)p.num("dy", 0));
+		return Value::object().set("pattern_index", pattern).set("bounding_box", Value::from(PATTERN_API->GetBoundingBoxOfPattern(pattern)));
+	};
+
+	// -- Lines and shapes --
+	h["add_internal_shape"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		auto points = Points(p);
+		int result = PATTERN_API->CreateInternalShapeWithPoints(pattern, points, p.boolean("closed", false));
+		return Value::object().set("pattern_index", pattern).set("point_count", (int)points.size()).set("result", result);
+	};
+	h["offset_internal_line"] = [](const Value& p) {
+		int pattern = PatternIndex(p), line = LineIndex(p, pattern);
+		PATTERN_API->OffsetAsInternalLine(pattern, line, I(p, "count", 1), (float)p.num("distance"),
+										  p.boolean("reverse", false), p.boolean("extend", false));
+		return Value::object().set("pattern_index", pattern).set("line_index", line).set("created", true);
+	};
+	h["distribute_internal_lines"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		const Value* lines = p.find("line_indices");
+		if (!lines || lines->type != Value::Array || lines->a.size() < 2)
+			throw std::runtime_error("'line_indices' must list at least two outline lines to distribute between");
+		std::vector<int> indices;
+		int count = LineCount(pattern);
+		for (const Value& v : lines->a)
+		{
+			int line = (int)v.n;
+			if (line < 0 || line >= count)
+				throw std::runtime_error("line index " + std::to_string(line) + " is out of range");
+			indices.push_back(line);
+		}
+		PATTERN_API->DistribueInternalLinesbetweenSegments(pattern, indices, I(p, "count"), p.boolean("straight", true),
+														   p.boolean("perpendicular", false), p.boolean("graduate", false));
+		return Value::object().set("pattern_index", pattern).set("created", true);
+	};
+	h["convert_shape"] = [](const Value& p) {
+		int pattern = PatternIndex(p), child = I(p, "internal_shape");
+		std::string to = p.str("to");
+		if (to == "internal")
+			PATTERN_API->ConvertToInternalLine(pattern, child);
+		else if (to == "base")
+			PATTERN_API->ConvertToBaseLine(pattern, child);
+		else
+			throw std::runtime_error("'to' must be \"internal\" or \"base\"");
+		return Value::object().set("pattern_index", pattern).set("internal_shape", child).set("converted_to", to);
+	};
+	h["move_point"] = [](const Value& p) {
+		int pattern = PatternIndex(p), point = I(p, "point_index");
+		if (point < 0 || point >= LineCount(pattern))
+			throw std::runtime_error("point_index is out of range");
+		PATTERN_API->MovePatternPoint(pattern, point, (float)p.num("x"), (float)p.num("y"));
+		return Value::object().set("pattern_index", pattern).set("point_index", point).set("moved", true);
+	};
+	h["delete_point"] = [](const Value& p) {
+		int pattern = PatternIndex(p), point = I(p, "point_index");
+		if (point < 0 || point >= LineCount(pattern))
+			throw std::runtime_error("point_index is out of range");
+		PATTERN_API->DeletePoint(pattern, point);
+		return Value::object().set("pattern_index", pattern).set("point_index", point).set("deleted", true);
+	};
+	h["delete_line"] = [](const Value& p) {
+		int pattern = PatternIndex(p), line = LineIndex(p, pattern);
+		PATTERN_API->DeleteLine(pattern, line);
+		return Value::object().set("pattern_index", pattern).set("line_index", line).set("deleted", true);
+	};
+	h["mirror_pattern"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		int before = PATTERN_API->GetPatternCount();
+		PATTERN_API->SymmetryPatternPiece(pattern, p.boolean("with_sewing", true));
+		return Value::object().set("pattern_index", pattern).set("pattern_count", PATTERN_API->GetPatternCount()).set("created", PATTERN_API->GetPatternCount() > before);
+	};
+	h["unfold_pattern"] = [](const Value& p) {
+		int pattern = PatternIndex(p), line = LineIndex(p, pattern);
+		bool ok = PATTERN_API->UnfoldPatternPiece(pattern, line, p.boolean("half_symmetry", false));
+		return Value::object().set("pattern_index", pattern).set("line_index", line).set("unfolded", ok);
+	};
+
+	// -- Elastic and shrinkage --
+	h["set_elastic"] = [](const Value& p) {
+		int pattern = PatternIndex(p), line = LineIndex(p, pattern, "line_index", true);
+		Value r = Value::object().set("pattern_index", pattern).set("line_index", line);
+		if (p.has("enabled")) { bool v = p.boolean("enabled", true); PATTERN_API->SetPatternPieceElastic(pattern, line, v); r.set("enabled", v); }
+		if (p.has("strength")) { float v = (float)p.num("strength"); PATTERN_API->SetPatternPieceElasticStrength(pattern, line, v); r.set("strength", v); }
+		if (p.has("ratio")) { int v = I(p, "ratio"); PATTERN_API->SetPatternPieceElasticStrengthRatio(pattern, line, v); r.set("ratio", v); }
+		if (p.has("segment_length")) { float v = (float)p.num("segment_length"); PATTERN_API->SetPatternPieceElasticSegmentLength(pattern, line, v); r.set("segment_length", v); }
+		if (p.has("total_length")) { float v = (float)p.num("total_length"); PATTERN_API->SetPatternPieceElasticTotalLength(pattern, line, v); r.set("total_length", v); }
+		if (r.o.size() == 2)
+			throw std::runtime_error("nothing to set; pass enabled, strength, ratio, segment_length or total_length");
+		return r;
+	};
+	h["set_shrinkage"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		if (p.has("width_percent")) PATTERN_API->SetWidthShrinkagePercentage(pattern, (float)p.num("width_percent"));
+		if (p.has("height_percent")) PATTERN_API->SetHeightShrinkagePercentage(pattern, (float)p.num("height_percent"));
+		return Value::object().set("pattern_index", pattern).set("shrinkage", Value::from(PATTERN_API->GetShrinkagePercentage(pattern)));
 	};
 
 	return h;

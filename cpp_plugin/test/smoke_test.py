@@ -50,12 +50,22 @@ def main():
     check("get_pattern_list", [p["name"] for p in patterns["patterns"]], ["Piece 0", "Piece 1"])
     check("set_pattern_name", conn.send_command("set_pattern_name", {"pattern_index": 0, "name": "Front"}, retries=1),
           {"index": 0, "name": "Front"})
-    for cmd, expected in [("bogus_command", "Unknown command"), ("get_project_info", "native exception")]:
+    check("set_pattern_state", conn.send_command("set_pattern_state", {"pattern_index": 1, "frozen": True}, retries=1),
+          {"pattern_index": 1, "frozen": True})
+    # Invalid input must come back as a clear error before anything reaches CLO's API.
+    for label, cmd, params, expected in [
+        ("bogus_command", "bogus_command", None, "Unknown command"),
+        ("get_project_info", "get_project_info", None, "native exception"),
+        ("bad pattern index", "set_pattern_state", {"pattern_index": 5, "frozen": True}, "out of range (2 patterns)"),
+        ("bad line index", "sew_lines", {"pattern_a": 0, "line_a": 3, "pattern_b": 1, "line_b": 0}, "out of range"),
+        ("nothing to set", "set_pattern_state", {"pattern_index": 0}, "no state given"),
+        ("bad shape style", "place_pattern", {"pattern_index": 0, "shape_style": "Round"}, "Flat"),
+    ]:
         try:
-            conn.send_command(cmd, retries=1)
-            check(cmd, "no error", expected)
+            conn.send_command(cmd, params, retries=1)
+            check(label, "no error", expected)
         except CLO3DConnectionError as e:
-            check(cmd, expected if expected in str(e) else str(e), expected)
+            check(label, expected if expected in str(e) else str(e), expected)
 
     output = host.communicate(timeout=30)[0]
     print(output.strip())
