@@ -72,7 +72,7 @@ jobs:
           Copy-Item cpp_plugin\dist\CloMcpPlugin.dll release\
           $hash = (Get-FileHash release\CloMcpPlugin.dll -Algorithm SHA256).Hash.ToLower()
           # LF line ending so `sha256sum -c` works on any platform
-          [IO.File]::WriteAllText("$PWDelease\CloMcpPlugin.dll.sha256", "$hash  CloMcpPlugin.dll`n")
+          [IO.File]::WriteAllText((Join-Path $PWD "release/CloMcpPlugin.dll.sha256"), "$hash  CloMcpPlugin.dll`n")
           Get-Content release\CloMcpPlugin.dll.sha256
 
       - uses: actions/upload-artifact@v4
