@@ -122,7 +122,8 @@ def make_rod_pocket(
     pocket_side: str = "front",
 ) -> dict:
     """Make a rod pocket along a panel's top edge and hang the panel on a rod (curtains,
-    banners, flags). The panel needs a straight, horizontal top edge.
+    banners, flags). The panel needs a straight, horizontal top edge. Verified with one panel;
+    with several panels a pocket often fails to wrap, so prefer hang_on_rod there.
 
     Adds a pocket strip above the panel, sews it to the top edge and to a fold line, holds the
     panel still, places a rod just in front of the strip above the top edge (the folding strip
@@ -148,12 +149,54 @@ def make_rod_pocket(
             return add_rod(params["center"], params["length"], params["diameter"], "x")
         if command == "__remove_object__":
             return remove_collision_object(params["index"])
+        if command == "__map_cloth__":
+            return map_cloth_to_patterns()
         if command == "__pattern_bounds__":
             return get_cloth_bounds(params.get("min"), params.get("max"), params["pattern_index"])
         return _send(command, params)
 
     return build(send, pattern_index, pocket_depth, rod_diameter, rod_overhang, settle_steps,
                  pocket_side=pocket_side)
+
+
+@mcp.tool()
+def hang_on_rod(
+    pattern_index: int | list[int],
+    band_height: float = 60.0,
+    rod_diameter: float = 30.0,
+    rod_overhang: float = 200.0,
+    settle_steps: int = 150,
+    rod_side: str = "front",
+    fabric_index: int | None = None,
+) -> dict:
+    """Hang panels on a rod from a frozen header band: the reliable way to hang curtains,
+    noren and banners (make_rod_pocket's folded pocket is not reliable with several panels).
+
+    Adds a band above each panel's straight top edge, sews it on, freezes it flat (it acts like
+    a pin line) and lays a rod along it; the panels drape from the bands. The pocket does not
+    wrap the rod in 3D: the rod lies against the band's rod_side face, so from the other side it
+    looks like a rod pocket with the rod ends showing. Save a checkpoint first.
+
+    Args:
+        pattern_index: The panel, or a list of panels sharing one rod; their top edges must be
+            at the same height.
+        band_height: Height of the band in mm, added above the top edge (so make the panels
+            that much shorter for a given finished height). At least rod_diameter + 10.
+        rod_diameter: Rod diameter in mm.
+        rod_overhang: How far the rod extends past each side, in mm.
+        settle_steps: Simulation steps to let the panels hang.
+        rod_side: "front" (+z, towards the front camera) or "back" (-z).
+        fabric_index: Fabric for the bands (default: each panel's own fabric).
+    """
+    from clo3d_mcp.rod_pocket import hang_on_rod as build
+
+    def send(command, params=None):
+        if command == "__add_rod__":
+            return add_rod(params["center"], params["length"], params["diameter"], "x")
+        return _send(command, params)
+
+    return build(send, pattern_index, band_height, rod_diameter, rod_overhang, settle_steps,
+                 rod_side=rod_side, fabric_index=fabric_index)
 
 
 @mcp.tool()
@@ -178,9 +221,67 @@ def get_cloth_bounds(region_min: list[float] | None = None, region_max: list[flo
     return _send("get_cloth_bounds", params)
 
 
+# Pattern -> cloth vertex slice, found while the cloth was flat; valid while CLO's mesh is
+# unchanged (same per-pattern counts and total).
+_layout = {"key": None, "ranges": None}
+
+
+def _mesh_key(counts):
+    from clo3d_mcp.cloth_layout import vertex_count
+    return (tuple(vertex_count(c) for c in counts["patterns"]), int(counts["total_vertices"]))
+
+
+@mcp.tool()
+def map_cloth_to_patterns() -> dict:
+    """Work out which cloth vertices belong to which pattern, for get_cloth_bounds(pattern_index).
+    Run while the pieces are still flat (after a few simulation steps, before draping).
+
+    CLO lists cloth vertices pattern by pattern, but its per-pattern counts are slightly off, so
+    the boundaries are found from the flat layout. Freezing or unfreezing pieces reorders CLO's
+    list (unfrozen pieces first) and changes the mesh; the map is then refused, so map again in
+    the new state."""
+    from clo3d_mcp.cloth_layout import segment, vertex_count, vertex_ranges
+    counts = _send("get_mesh_counts")
+    for _ in range(10):  # CLO reports positions only after a few steps (also after a reset)
+        if counts["total_vertices"]:
+            break
+        _send("simulate", {"steps": 2})
+        counts = _send("get_mesh_counts")
+    key = _mesh_key(counts)
+    try:
+        ranges = vertex_ranges(counts)
+    except ValueError:
+        pieces = summarize(_send("get_pattern_geometry"), include_points=True)["pieces"]
+        polygons = [[tuple(pt[:2]) for line in p["lines"] for pt in line["points"][:-1]] for p in pieces]
+        layers = [_send("get_pattern_state", {"pattern_index": p["pattern_index"]})["layer"] for p in pieces]
+        cache = {}
+
+        def vertex_at(k):
+            if k not in cache:
+                cache[k] = _send("get_cloth_bounds", {"vertex_range": [k, 1]})["min"]
+            return cache[k]
+
+        base = [i for i, layer in enumerate(layers) if layer == 0]
+        plane_z = vertex_at(0)[2] if base else 200.0
+        # layers only separate in depth once CLO has pushed them apart; else ignore depth
+        separated = any(abs(vertex_at(k)[2] - plane_z) > 1.0 for k in range(0, key[1], max(1, key[1] // 40)))
+        ranges = segment(vertex_at, polygons, layers, [vertex_count(c) for c in counts["patterns"]],
+                         key[1], plane_z, separated)
+    _layout.update(key=key, ranges=ranges)
+    return {"patterns": len(ranges), "vertices": key[1], "ranges": ranges}
+
+
 def _pattern_vertex_range(pattern_index: int):
     from clo3d_mcp.cloth_layout import vertex_ranges
-    ranges = vertex_ranges(_send("get_mesh_counts"))
+    counts = _send("get_mesh_counts")
+    if _layout["key"] == _mesh_key(counts):
+        ranges = _layout["ranges"]
+    else:
+        try:
+            ranges = vertex_ranges(counts)
+        except ValueError:
+            raise ValueError("CLO's cloth vertices are not mapped to patterns for the current mesh; "
+                             "call map_cloth_to_patterns while the pieces are still flat") from None
     if not 0 <= pattern_index < len(ranges):
         raise ValueError("no pattern %d" % pattern_index)
     return ranges[pattern_index]

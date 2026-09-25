@@ -17,5 +17,16 @@ def test_ranges_are_contiguous_when_counts_add_up():
 
 
 def test_mismatch_is_refused_instead_of_guessed():
-    with pytest.raises(ValueError, match="not available"):
+    with pytest.raises(ValueError, match="add up to 10 but CLO reports 12"):
         vertex_ranges({"patterns": [{"vertex": "10"}], "total_vertices": 12})
+
+
+def test_segment_finds_real_boundaries_shorter_than_clo_counts():
+    from clo3d_mcp.cloth_layout import segment
+    # two flat squares side by side; CLO "counts" 60 + 60 but lists 50 + 45 vertices
+    left = [(0, 0), (100, 0), (100, 100), (0, 100)]
+    right = [(200, 0), (300, 0), (300, 100), (200, 100)]
+    verts = [[10 + (k % 8) * 10, 10 + (k // 8) * 10, 200] for k in range(50)]
+    verts += [[210 + (k % 8) * 10, 10 + (k // 8) * 10, 200] for k in range(45)]
+    ranges = segment(lambda k: verts[k], [left, right], [0, 0], [60, 60], len(verts), 200.0, False)
+    assert ranges == [(0, 50), (50, 45)]

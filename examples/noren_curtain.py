@@ -2,7 +2,8 @@
 blue header patch, a 10-point star split across the panels and L-shaped blue bottom blocks).
 
 Finished size 1050 x 2020 mm, two separate panels on a 32 mm rod. 2D pattern coordinates are
-millimetres with y up; the finished bottom edge is y = 0 and the top edge y = 2020.
+millimetres with y up; the finished bottom edge is y = 0 and the top edge y = 2020. The panels
+end at TOP; hang_on_rod adds the 60 mm header band the rod lies along above them.
 
 Run with CLO open, an empty scene and the MCP listener running:
     uv run python examples/noren_curtain.py
@@ -24,9 +25,11 @@ COLOURS = {"brown": (92, 62, 45), "blue": (122, 138, 160), "light": (165, 176, 1
 
 # Proportions read from the reference photo (1 px ~ 1.02 mm across, 1.15 mm down)
 STAR_CENTRE, STAR_R, STAR_r, STAR_POINTS = (SPLIT, H - 877.0), 205.0, 110.0, 10
-HEADER = (174.0, 845.0, H - 240.0, H - 30.0)          # x0, x1, y0, y1
-# The rod pocket forms on the +z side, so the curtain's decorative face points at CLO's "back"
-# camera (-z). Seen from there, left and right swap: 2D x 0..525 is the viewer's right panel.
+BAND = 60.0                  # header band hang_on_rod adds for the rod
+TOP = H - BAND               # the panels' top edge
+HEADER = (174.0, 845.0, TOP - 220.0, TOP - 10.0)      # x0, x1, y0, y1
+# The rod lies on the +z side of the band, so the curtain's decorative face points at CLO's
+# "back" camera (-z). Seen from there, left and right swap: 2D x 0..525 is the viewer's right panel.
 LEFT = {"band_top": 220.0, "strip_x": 149.0, "strip_top": 530.0, "square": (149.0, 318.0, 220.0, 375.0)}
 RIGHT = {"band_top": 231.0, "strip_x": 875.0, "strip_top": 531.0, "square": (712.0, 875.0, 369.0, 531.0)}
 FACE, REVERSE = -1, 1   # pattern layers: -1 = towards the back camera = the curtain's face
@@ -63,10 +66,6 @@ def star_half(side):
         pts.append([round(cx + r * math.cos(angle), 2), round(cy + r * math.sin(angle), 2)])
     pts[0][0] = pts[-1][0] = cx  # top and bottom points exactly on the split
     return pts
-
-
-POCKET_DEPTH = 150.0
-FOLD_Y = H - POCKET_DEPTH * 0.4   # the rod pocket's fold line; its back is the pocket
 
 
 def applique(base, outline, sewn_lines, fabric, name, reverse=True, reverse_outline=None):
@@ -115,7 +114,7 @@ if __name__ == "__main__":
 
     # --- left panel: brown body with a notch for the blue side strip, blue bottom band ---
     bt, sx, st = LEFT["band_top"], LEFT["strip_x"], LEFT["strip_top"]
-    body_l = piece([[sx, bt], [SPLIT, bt], [SPLIT, H], [0, H], [0, st], [sx, st]], "brown", "Left body")
+    body_l = piece([[sx, bt], [SPLIT, bt], [SPLIT, TOP], [0, TOP], [0, st], [sx, st]], "brown", "Left body")
     band_l = piece([[0, 0], [SPLIT, 0], [SPLIT, bt], [sx, bt], [0, bt]], "blue", "Left bottom band")
     strip_l = piece([[0, bt], [sx, bt], [sx, st], [0, st]], "blue", "Left side strip")
     sew(body_l, 0, band_l, 2)     # body bottom (x 175 -> 525) to band top-right (525 -> 175)
@@ -125,7 +124,7 @@ if __name__ == "__main__":
 
     # --- right panel ---
     bt, sx, st = RIGHT["band_top"], RIGHT["strip_x"], RIGHT["strip_top"]
-    body_r = piece([[SPLIT, bt], [sx, bt], [sx, st], [W, st], [W, H], [SPLIT, H]], "brown", "Right body")
+    body_r = piece([[SPLIT, bt], [sx, bt], [sx, st], [W, st], [W, TOP], [SPLIT, TOP]], "brown", "Right body")
     band_r = piece([[SPLIT, 0], [W, 0], [W, bt], [sx, bt], [SPLIT, bt]], "blue", "Right bottom band")
     strip_r = piece([[sx, bt], [W, bt], [W, st], [sx, st]], "blue", "Right side strip")
     sew(body_r, 0, band_r, 3)     # body bottom (525 -> 901) to band top-left (901 -> 525)
@@ -135,11 +134,11 @@ if __name__ == "__main__":
     step("panels and 15 mm joins: %d pieces, %d seams" % (s.get_pattern_count()["count"], len(s.get_pattern_geometry()["seams"])))
 
     # --- hems as hem lines at the finished widths (CLO's API cannot set fold angles) ---
-    for p, x, y0, y1 in ((body_l, HEM_OUTER, LEFT["strip_top"], H), (strip_l, HEM_OUTER, LEFT["band_top"], LEFT["strip_top"]),
-                         (band_l, HEM_OUTER, 0, LEFT["band_top"]), (body_l, SPLIT - HEM_CENTRE, LEFT["band_top"], H),
+    for p, x, y0, y1 in ((body_l, HEM_OUTER, LEFT["strip_top"], TOP), (strip_l, HEM_OUTER, LEFT["band_top"], LEFT["strip_top"]),
+                         (band_l, HEM_OUTER, 0, LEFT["band_top"]), (body_l, SPLIT - HEM_CENTRE, LEFT["band_top"], TOP),
                          (band_l, SPLIT - HEM_CENTRE, 0, LEFT["band_top"]),
-                         (body_r, W - HEM_OUTER, RIGHT["strip_top"], H), (strip_r, W - HEM_OUTER, RIGHT["band_top"], RIGHT["strip_top"]),
-                         (band_r, W - HEM_OUTER, 0, RIGHT["band_top"]), (body_r, SPLIT + HEM_CENTRE, RIGHT["band_top"], H),
+                         (body_r, W - HEM_OUTER, RIGHT["strip_top"], TOP), (strip_r, W - HEM_OUTER, RIGHT["band_top"], RIGHT["strip_top"]),
+                         (band_r, W - HEM_OUTER, 0, RIGHT["band_top"]), (body_r, SPLIT + HEM_CENTRE, RIGHT["band_top"], TOP),
                          (band_r, SPLIT + HEM_CENTRE, 0, RIGHT["band_top"])):
         hem_line(p, [x, y0], [x, y1])
     hem_line(band_l, [0, HEM_BOTTOM], [SPLIT, HEM_BOTTOM])
@@ -148,11 +147,8 @@ if __name__ == "__main__":
 
     # --- appliqué: front and reverse, sewn along their inner edges ---
     x0, x1, y0, y1 = HEADER
-    ry1 = min(y1, FOLD_Y - 20.0)   # the reverse header stops below the rod pocket (+z side)
-    applique(body_l, [[SPLIT, y1], [x0, y1], [x0, y0], [SPLIT, y0]], 3, "light", "Header L",
-             reverse_outline=[[SPLIT, ry1], [x0, ry1], [x0, y0], [SPLIT, y0]])
-    applique(body_r, [[SPLIT, y1], [x1, y1], [x1, y0], [SPLIT, y0]], 3, "light", "Header R",
-             reverse_outline=[[SPLIT, ry1], [x1, ry1], [x1, y0], [SPLIT, y0]])
+    applique(body_l, [[SPLIT, y1], [x0, y1], [x0, y0], [SPLIT, y0]], 3, "light", "Header L")
+    applique(body_r, [[SPLIT, y1], [x1, y1], [x1, y0], [SPLIT, y0]], 3, "light", "Header R")
     applique(body_l, star_half(+1), STAR_POINTS, "light", "Star L")
     applique(body_r, star_half(-1), STAR_POINTS, "light", "Star R")
     qx0, qx1, qy0, qy1 = LEFT["square"]    # beside the strip, on top of the band: 2 free edges
@@ -161,10 +157,15 @@ if __name__ == "__main__":
     applique(body_r, [[qx1, qy1], [qx0, qy1], [qx0, qy0], [qx1, qy0]], 3, "light", "Square R")
     step("appliqué: header, star and squares, front and reverse (%d pieces)" % s.get_pattern_count()["count"])
 
-    # --- rod pocket on both panels, one 32 mm rod ---
+    if "--flat-only" in sys.argv:  # stop before the rod pocket (e.g. to inspect the flat layout)
+        step("flat build done in %.0f s" % (time.time() - t0))
+        sys.exit(0)
+
+    # --- both panels on one 32 mm rod, from frozen header bands ---
     s.save_checkpoint("noren_flat")
-    result = s.make_rod_pocket([body_l, body_r], pocket_depth=POCKET_DEPTH, rod_diameter=ROD_DIAMETER,
-                               pocket_side="front")
-    step("rod pocket: hangs=%s %s" % (result["hangs"], [(p["pattern_index"], p["sag_mm"]) for p in result["panels"]]))
+    result = s.hang_on_rod([body_l, body_r], band_height=BAND, rod_diameter=ROD_DIAMETER, rod_side="front")
+    for p in result["panels"]:
+        step("  panel %d: cloth just below its band at 20/50/80%% of its width: %s" % (p["pattern_index"], p["below_band"]))
+    step("hang on rod: hangs=%s, finished top y=%.0f" % (result["hangs"], result["finished_top_y"]))
     s.simulate(100)
     step("done in %.0f s" % (time.time() - t0))

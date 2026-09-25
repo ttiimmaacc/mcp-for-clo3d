@@ -55,3 +55,11 @@ def test_wrap_needs_cloth_over_the_rod_and_round_its_far_side():
     assert wrapped(over_and_round, rod_y=2030, rod_z=219, radius=16, side=1)
     assert not wrapped(only_over, rod_y=2030, rod_z=219, radius=16, side=1)
     assert not wrapped({"vertex_count": 0}, rod_y=2030, rod_z=219, radius=16, side=1)
+
+
+def test_band_rod_sits_mid_band_just_clear_of_its_face():
+    from clo3d_mcp.rod_pocket import band_rod
+    assert band_rod(top_y=1960, plane_z=200, band_height=60, rod_diameter=32, side=1) == (1990, 217)
+    assert band_rod(top_y=1960, plane_z=200, band_height=60, rod_diameter=32, side=-1) == (1990, 183)
+    with pytest.raises(ValueError, match="band_height >= 42"):
+        band_rod(top_y=1960, plane_z=200, band_height=40, rod_diameter=32, side=1)
