@@ -251,6 +251,19 @@ std::wstring Widen(const std::string& s)
 
 typedef std::function<Value(const Value&)> Handler;
 
+// GetFabricCount(true) returned 0 in CLO 2025.2.236 with fabrics in the scene; take the
+// larger count and, failing that, count fabrics by name.
+unsigned int FabricCount()
+{
+	unsigned int count = FABRIC_API->GetFabricCount(true);
+	unsigned int all = FABRIC_API->GetFabricCount(false);
+	if (all > count) count = all;
+	if (count == 0)
+		while (count < 1024 && !FABRIC_API->GetFabricName((int)count).empty())
+			++count;
+	return count;
+}
+
 std::map<std::string, Handler> BuildHandlers()
 {
 	std::map<std::string, Handler> h;
@@ -272,7 +285,7 @@ std::map<std::string, Handler> BuildHandlers()
 								 std::to_string(UTILITY_API->GetMinorVersion()) + "." +
 								 std::to_string(UTILITY_API->GetPatchVersion()));
 		r.set("pattern_count", PATTERN_API->GetPatternCount());
-		r.set("fabric_count", FABRIC_API->GetFabricCount(true));
+		r.set("fabric_count", FabricCount());
 		r.set("colorway_count", UTILITY_API->GetColorwayCount());
 		return r;
 	};
@@ -363,14 +376,55 @@ std::map<std::string, Handler> BuildHandlers()
 
 	// -- Fabric --
 	h["get_fabric_count"] = [](const Value&) {
-		return Value::object().set("count", FABRIC_API->GetFabricCount(true));
+		return Value::object().set("count", FabricCount());
 	};
 	h["get_fabric_list"] = [](const Value&) {
-		unsigned int count = FABRIC_API->GetFabricCount(true);
+		unsigned int count = FabricCount();
 		Value list = Value::array();
 		for (unsigned int i = 0; i < count; ++i)
-			list.a.push_back(Value::object().set("index", i));
+			list.a.push_back(Value::object().set("index", i).set("name", FABRIC_API->GetFabricName((int)i)));
 		return Value::object().set("fabrics", list).set("count", count);
+	};
+	h["get_fabric_info"] = [](const Value& p) {
+		int fabric = I(p, "fabric_index");
+		Value info = Value::object();
+		for (const auto& kv : FABRIC_API->GetFabricInformation(fabric))
+			info.set(kv.first, kv.second);
+		return Value::object().set("fabric_index", fabric).set("name", FABRIC_API->GetFabricName(fabric))
+			.set("information", info).set("fabric_info_json", FABRIC_API->GetFabricInfo(fabric));
+	};
+	h["set_fabric_information"] = [](const Value& p) {
+		int fabric = I(p, "fabric_index");
+		std::map<std::string, std::string> info;
+		if (p.has("information"))
+			for (const auto& kv : p.find("information")->o)
+				info[kv.first] = kv.second.s;
+		if (!info.empty())
+			FABRIC_API->SetFabricInformation(fabric, info);
+		if (p.has("name"))
+			FABRIC_API->SetFabricName((unsigned int)fabric, p.str("name"));
+		Value now = Value::object();
+		for (const auto& kv : FABRIC_API->GetFabricInformation(fabric))
+			now.set(kv.first, kv.second);
+		return Value::object().set("fabric_index", fabric).set("name", FABRIC_API->GetFabricName(fabric)).set("information", now);
+	};
+	h["export_fabric"] = [](const Value& p) {
+		int fabric = I(p, "fabric_index");
+		std::string path = FABRIC_API->ExportFabric(p.str("file_path"), fabric);
+		return Value::object().set("fabric_index", fabric).set("file_path", path).set("exported", !path.empty());
+	};
+	h["change_fabric_with_json"] = [](const Value& p) {
+		unsigned int fabric = U(p, "fabric_index");
+		std::string path = p.str("file_path");
+		return Value::object().set("fabric_index", fabric).set("changed", FABRIC_API->ChangeFabricWithJson(fabric, path));
+	};
+	h["export_pattern_json"] = [](const Value& p) {
+		std::string path = p.str("file_path");
+		return Value::object().set("file_path", path).set("exported", PATTERN_API->ExportPatternJSON(path));
+	};
+	h["import_pattern_json"] = [](const Value& p) {
+		std::string path = p.str("file_path");
+		return Value::object().set("file_path", path).set("imported", PATTERN_API->ImportPatternJSON(path));
 	};
 	h["add_fabric"] = [](const Value& p) {
 		std::string path = p.str("file_path");

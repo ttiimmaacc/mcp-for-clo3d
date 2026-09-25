@@ -622,8 +622,43 @@ def get_arrangement_list() -> dict:
 
 @mcp.tool()
 def get_fabric_list() -> dict:
-    """Get a list of all fabrics in the current project with their indices."""
+    """Get a list of all fabrics in the current project with their indices and names."""
     return _send("get_fabric_list")
+
+
+@mcp.tool()
+def get_fabric_info(fabric_index: int) -> dict:
+    """A fabric's name, its information fields (content, classification, supplier...) and
+    CLO's fabric info JSON."""
+    return _send("get_fabric_info", {"fabric_index": fabric_index})
+
+
+@mcp.tool()
+def set_fabric_information(fabric_index: int, information: dict[str, str] | None = None,
+                           name: str | None = None) -> dict:
+    """Set a fabric's name and information fields, e.g. {"Content": "60% Cotton, 40% Linen"}.
+    Field names are CLO's (see get_fabric_info). This is metadata only; the drape comes from
+    the fabric's physical properties.
+    """
+    return _send("set_fabric_information", _given(fabric_index=fabric_index, information=information, name=name))
+
+
+@mcp.tool()
+def export_fabric(fabric_index: int, file_path: str) -> dict:
+    """Save a fabric as .jfab (JSON, editable) or .zfab.
+
+    Args:
+        fabric_index: Fabric to export.
+        file_path: Absolute output path ending in .jfab or .zfab.
+    """
+    return _send("export_fabric", {"fabric_index": fabric_index, "file_path": file_path})
+
+
+@mcp.tool()
+def apply_fabric_json(fabric_index: int, file_path: str) -> dict:
+    """Overwrite all of a fabric's properties from a .jfab file (e.g. one saved with
+    export_fabric and edited)."""
+    return _send("change_fabric_with_json", {"fabric_index": fabric_index, "file_path": file_path})
 
 
 @mcp.tool()
@@ -1097,6 +1132,110 @@ def mirror_pattern(pattern_index: int, with_sewing: bool = True) -> dict:
 def unfold_pattern(pattern_index: int, line_index: int, half_symmetry: bool = False) -> dict:
     """Unfold a half pattern across one of its lines (e.g. the centre-front fold line)."""
     return _send("unfold_pattern", {"pattern_index": pattern_index, "line_index": line_index, "half_symmetry": half_symmetry})
+
+
+# ─── Hems & Appliqué ───────────────────────────────────────────────────────
+
+
+def _piece(pattern_index: int) -> dict:
+    pieces = [p for p in summarize(_send("get_pattern_geometry"))["pieces"] if p["pattern_index"] == pattern_index]
+    if not pieces:
+        raise ValueError("no pattern %d" % pattern_index)
+    return pieces[0]
+
+
+def _layered_piece(base: int, points, layer: int, fabric_index, name: str, place_flat: bool) -> int:
+    """Create a piece lying on the base piece, in its fabric, on a layer."""
+    index = _send("get_pattern_count")["count"]
+    _send("create_pattern", {"points": points})
+    if _send("get_pattern_count")["count"] != index + 1:
+        raise RuntimeError("CLO did not create the piece")
+    fabric = fabric_index if fabric_index is not None else _send("get_fabric_for_pattern", {"pattern_index": base}).get("fabric_index")
+    if fabric is not None:
+        _send("assign_fabric", {"fabric_index": fabric, "pattern_index": index, "assign_option": 1})
+    _send("set_pattern_name", {"pattern_index": index, "name": name})
+    _send("set_pattern_state", {"pattern_index": index, "layer": layer})
+    if place_flat:
+        _send("place_pattern", {"pattern_index": index, "shape_style": "Flat"})
+    return index
+
+
+@mcp.tool()
+def add_hem(pattern_index: int, line_index: int, width: float, layer: int = -1,
+            fabric_index: int | None = None, place_flat: bool = True) -> dict:
+    """Hem a straight edge: adds the turned-back layer as a strip covering the hem area on the
+    reverse side, sewn along the edge and along a new hem line (CLO's API cannot fold cloth;
+    fold angles are ignored by the simulation). Gives the doubled fabric at the edge. The
+    pattern's edge is the finished edge, so draw pieces at their finished size.
+
+    Args:
+        pattern_index: Piece to hem.
+        line_index: The straight outline line to hem (from get_pattern_geometry / view_patterns).
+        width: Finished hem width in mm.
+        layer: Layer for the hem strip: -1 = the -z side (towards the back camera), 1 = the +z
+            side. Use the side opposite the garment's face. Where hems cross (a bottom hem and
+            the side hems), put the later ones one layer further out (e.g. -2), like the real
+            corner; on the same layer the overlapping strips crumple.
+        fabric_index: Fabric for the strip (default: the piece's fabric).
+        place_flat: Place the strip Flat, like a piece laid out without an avatar; set False
+            and place it yourself for pieces on an avatar.
+    """
+    from clo3d_mcp.layers import hem_strip
+    piece = _piece(pattern_index)
+    corners, hem_line = hem_strip(piece, line_index, width)
+    shape = len(piece["internal_shapes"])
+    _send("add_internal_shape", {"pattern_index": pattern_index, "points": hem_line, "closed": False})
+    strip = _layered_piece(pattern_index, corners, layer, fabric_index,
+                           "%s hem" % (piece.get("name") or "Pattern %d" % pattern_index), place_flat)
+    edge = _send("sew_lines", {"pattern_a": strip, "line_a": 0, "pattern_b": pattern_index, "line_b": line_index,
+                               "direction_a": True, "direction_b": True})
+    fold = _send("sew_lines", {"pattern_a": strip, "line_a": 2, "pattern_b": pattern_index, "line_b": 0,
+                               "direction_a": True, "direction_b": False, "internal_shape_b": shape})
+    return {"hem_pattern_index": strip, "hem_line_internal_shape": shape, "hem_line": hem_line,
+            "seams": [edge.get("seam_index"), fold.get("seam_index")], "layer": layer}
+
+
+@mcp.tool()
+def add_applique(pattern_index: int, points: list[list[float]], sewn_lines: int | None = None,
+                 layer: int = 1, reverse: bool = False, fabric_index: int | None = None,
+                 name: str = "Applique", place_flat: bool = True, reverse_layer: int | None = None) -> dict:
+    """Add an appliqué patch on a piece, sewn to it where it sits (a new internal line on the
+    base marks each sewn edge). Optionally the matching patch on the other side ("front and
+    reverse patches"), sharing the same stitch line.
+
+    Args:
+        pattern_index: Base piece.
+        points: The patch outline in the base's 2D coordinates (mm), inside the piece.
+        sewn_lines: Sew only the first N edges (points[0]->points[1] is edge 0); edges on the
+            base's outline or a seam can stay free. Default: all edges.
+        layer: Layer for the patch: 1 = the +z side, -1 = the -z side.
+        reverse: Also add the same patch on the opposite layer.
+        fabric_index: Fabric for the patch (default: the base's fabric).
+        name: Name for the patch piece(s); " front"/" reverse" is added with reverse=True.
+        place_flat: Place the patch Flat; set False and place it yourself on an avatar.
+        reverse_layer: Layer for the reverse patch (default: -layer). Put it outside any hem
+            strips it crosses (e.g. 3 over hems on 1 and 2).
+    """
+    n = len(points)
+    if n < 3:
+        raise ValueError("an appliqué needs at least 3 points")
+    sewn = n if sewn_lines is None else sewn_lines
+    if not 1 <= sewn <= n:
+        raise ValueError("sewn_lines must be between 1 and %d" % n)
+    piece = _piece(pattern_index)
+    shape = len(piece["internal_shapes"])
+    closed = sewn == n
+    _send("add_internal_shape", {"pattern_index": pattern_index, "points": points if closed else points[:sewn + 1],
+                                 "closed": closed})
+    made = []
+    back = -layer if reverse_layer is None else reverse_layer
+    for side in ((layer, " front"), (back, " reverse")) if reverse else ((layer, ""),):
+        patch = _layered_piece(pattern_index, points, side[0], fabric_index, name + side[1], place_flat)
+        seams = [_send("sew_lines", {"pattern_a": patch, "line_a": k, "pattern_b": pattern_index, "line_b": k,
+                                     "direction_a": True, "direction_b": True, "internal_shape_b": shape}).get("seam_index")
+                 for k in range(sewn)]
+        made.append({"pattern_index": patch, "layer": side[0], "seams": seams})
+    return {"patches": made, "stitch_line_internal_shape": shape}
 
 
 # ─── Elastic & Shrinkage ───────────────────────────────────────────────────

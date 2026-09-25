@@ -90,3 +90,31 @@ def test_end_points_on_internal_shape_and_across_the_start():
     fold, wrap = seam["sides"]
     assert fold["start_point"] == [50, 0] and fold["end_point"] == [50, 100]
     assert wrap["start_point"] == [0, 50] and wrap["end_point"] == [50, 0]
+
+
+def _rect_piece(points):
+    lines = [{"line_index": i, "start": list(a), "end": list(b), "curved": False}
+             for i, (a, b) in enumerate(zip(points, points[1:] + points[:1]))]
+    return {"lines": lines}
+
+
+def test_hem_strip_goes_inside_for_either_winding():
+    from clo3d_mcp.layers import hem_strip
+    ccw = _rect_piece([(0, 0), (400, 0), (400, 600), (0, 600)])
+    cw = _rect_piece([(0, 0), (0, 600), (400, 600), (400, 0)])
+    assert hem_strip(ccw, 0, 70) == ([[0, 0], [400, 0], [400, 70], [0, 70]], [[0, 70], [400, 70]])
+    corners, line = hem_strip(cw, 3, 70)   # bottom edge (400,0) -> (0,0) on a clockwise outline
+    assert corners == [[400, 0], [0, 0], [0, 70], [400, 70]] and line == [[400, 70], [0, 70]]
+    corners, _ = hem_strip(ccw, 1, 30)     # right side hems inward (towards x < 400)
+    assert corners == [[400, 0], [400, 600], [370, 600], [370, 0]]
+
+
+def test_hem_strip_refuses_curves_and_bad_widths():
+    import pytest
+    from clo3d_mcp.layers import hem_strip
+    piece = _rect_piece([(0, 0), (400, 0), (400, 600), (0, 600)])
+    piece["lines"][0]["curved"] = True
+    with pytest.raises(ValueError, match="curved"):
+        hem_strip(piece, 0, 70)
+    with pytest.raises(ValueError, match="positive"):
+        hem_strip(_rect_piece([(0, 0), (400, 0), (400, 600), (0, 600)]), 0, 0)

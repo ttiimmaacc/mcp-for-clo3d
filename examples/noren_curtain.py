@@ -32,7 +32,10 @@ HEADER = (174.0, 845.0, TOP - 220.0, TOP - 10.0)      # x0, x1, y0, y1
 # "back" camera (-z). Seen from there, left and right swap: 2D x 0..525 is the viewer's right panel.
 LEFT = {"band_top": 220.0, "strip_x": 149.0, "strip_top": 530.0, "square": (149.0, 318.0, 220.0, 375.0)}
 RIGHT = {"band_top": 231.0, "strip_x": 875.0, "strip_top": 531.0, "square": (712.0, 875.0, 369.0, 531.0)}
-FACE, REVERSE = -1, 1   # pattern layers: -1 = towards the back camera = the curtain's face
+FACE = -1               # pattern layer of the face patches: -1 = towards the back camera
+# On the back (+z): bottom hems on layer 1, side hems crossing them on 2, reverse patches on 3
+HEM_BOTTOM_LAYER, HEM_SIDE_LAYER, REVERSE_PATCH = 1, 2, 3
+CONTENT = "60% Cotton, 40% Linen"
 
 log = []
 
@@ -68,29 +71,11 @@ def star_half(side):
     return pts
 
 
-def applique(base, outline, sewn_lines, fabric, name, reverse=True, reverse_outline=None):
-    """Patch on the front (layer 1) and, for 'front and reverse patches', a copy behind (layer -1).
-    The base gets an open internal line along the patch's sewn edges; each sewn edge of the patch
-    is stitched to it, so the patch stays attached where it sits."""
-    made = []
-    shapes = {}
-    for layer, label in ((FACE, "front"), (REVERSE, "reverse")) if reverse else ((FACE, "front"),):
-        shape_points = reverse_outline if (layer == REVERSE and reverse_outline) else outline
-        key = tuple(map(tuple, shape_points[:sewn_lines + 1]))
-        if key not in shapes:  # one internal line per distinct outline, shared by front and back
-            shapes[key] = len(s.get_pattern_geometry(base)["pieces"][0]["internal_shapes"])
-            s.add_internal_shape(base, shape_points[:sewn_lines + 1], closed=False)
-        shape = shapes[key]
-        patch = piece(shape_points, fabric, "%s %s" % (name, label))
-        s.set_pattern_state(patch, layer=layer)
-        for line in range(sewn_lines):
-            sew(patch, line, base, line, flip_b=False, shape_b=shape)
-        made.append(patch)
-    return made
-
-
-def hem_line(pattern, a, b):
-    s.add_internal_shape(pattern, [a, b], closed=False)
+def applique(base, outline, sewn_lines, fabric, name):
+    """'Front and reverse patches': the patch on the face and a copy on the back, sewn along the
+    same stitch line on the base; the edges on the panel's outline or a seam stay free."""
+    return s.add_applique(base, outline, sewn_lines=sewn_lines, layer=FACE, reverse=True,
+                          reverse_layer=REVERSE_PATCH, fabric_index=fabrics[fabric], name=name)
 
 
 if __name__ == "__main__":
@@ -105,11 +90,13 @@ if __name__ == "__main__":
     if info["pattern_count"] or s.get_avatars()["count"]:
         sys.exit("open an empty scene first (or pass --reset to clear a previous run)")
 
-    # Fabrics: CLO's linen in three colours (60/40 cotton-linen content cannot be set through the API yet)
+    # Fabrics: CLO's linen in three colours, labelled 60/40 cotton-linen (the label is metadata;
+    # the drape comes from the linen's physical properties)
     fabrics = {}
     for name, rgb in COLOURS.items():
         fabrics[name] = s.add_fabric(LINEN)["fabric_index"]
         s.set_fabric_color(fabrics[name], *rgb)
+        s.set_fabric_information(fabrics[name], {"Content": CONTENT}, name="Cotton-linen %s" % name)
     step("fabrics: %s" % fabrics)
 
     # --- left panel: brown body with a notch for the blue side strip, blue bottom band ---
@@ -133,17 +120,16 @@ if __name__ == "__main__":
     sew(strip_r, 0, band_r, 2)    # strip bottom (901 -> 1050) to band top-right (1050 -> 901)
     step("panels and 15 mm joins: %d pieces, %d seams" % (s.get_pattern_count()["count"], len(s.get_pattern_geometry()["seams"])))
 
-    # --- hems as hem lines at the finished widths (CLO's API cannot set fold angles) ---
-    for p, x, y0, y1 in ((body_l, HEM_OUTER, LEFT["strip_top"], TOP), (strip_l, HEM_OUTER, LEFT["band_top"], LEFT["strip_top"]),
-                         (band_l, HEM_OUTER, 0, LEFT["band_top"]), (body_l, SPLIT - HEM_CENTRE, LEFT["band_top"], TOP),
-                         (band_l, SPLIT - HEM_CENTRE, 0, LEFT["band_top"]),
-                         (body_r, W - HEM_OUTER, RIGHT["strip_top"], TOP), (strip_r, W - HEM_OUTER, RIGHT["band_top"], RIGHT["strip_top"]),
-                         (band_r, W - HEM_OUTER, 0, RIGHT["band_top"]), (body_r, SPLIT + HEM_CENTRE, RIGHT["band_top"], TOP),
-                         (band_r, SPLIT + HEM_CENTRE, 0, RIGHT["band_top"])):
-        hem_line(p, [x, y0], [x, y1])
-    hem_line(band_l, [0, HEM_BOTTOM], [SPLIT, HEM_BOTTOM])
-    hem_line(band_r, [SPLIT, HEM_BOTTOM], [W, HEM_BOTTOM])
-    step("hem lines: outer 30, centre 20, bottom 70 mm")
+    # --- hems: the turned-back layer on the back, sewn at the edge and the hem line ---
+    for p, line, width, layer in ((band_l, 0, HEM_BOTTOM, HEM_BOTTOM_LAYER), (band_r, 0, HEM_BOTTOM, HEM_BOTTOM_LAYER),
+                                  (body_l, 3, HEM_OUTER, HEM_SIDE_LAYER), (strip_l, 3, HEM_OUTER, HEM_SIDE_LAYER),
+                                  (band_l, 4, HEM_OUTER, HEM_SIDE_LAYER), (body_l, 1, HEM_CENTRE, HEM_SIDE_LAYER),
+                                  (band_l, 1, HEM_CENTRE, HEM_SIDE_LAYER),
+                                  (body_r, 3, HEM_OUTER, HEM_SIDE_LAYER), (strip_r, 1, HEM_OUTER, HEM_SIDE_LAYER),
+                                  (band_r, 1, HEM_OUTER, HEM_SIDE_LAYER), (body_r, 5, HEM_CENTRE, HEM_SIDE_LAYER),
+                                  (band_r, 4, HEM_CENTRE, HEM_SIDE_LAYER)):
+        s.add_hem(p, line, width, layer=layer)
+    step("hems: outer 30, centre 20, bottom 70 mm (%d pieces)" % s.get_pattern_count()["count"])
 
     # --- appliqué: front and reverse, sewn along their inner edges ---
     x0, x1, y0, y1 = HEADER
