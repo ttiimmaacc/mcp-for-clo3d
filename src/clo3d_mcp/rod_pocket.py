@@ -10,6 +10,13 @@ Recipe worked out by simulating a curtain in CLO 2025.2.236:
 - Cloth passes through a rod unless its mesh is finer than the rod, so both pieces get a
   small particle distance first.
 A new flat piece lies at its 2D (x, y) in 3D, in a plane of constant z.
+
+Why it is unreliable (controlled experiments, plain 525 x 1500 panels, one and two at a time):
+the seams pull the strip's free edge down to the fold line within a few steps, so the strip
+crumples into a lump instead of rolling into a loop, on whichever side it happens to go. It went
+away from the rod in most runs, including with the strip on layer +1 and with the rod 20 mm clear
+of it. A dependable pocket needs a fold angle on the fold line or a strip arranged around the
+rod, and CLO's API offers neither; hang_on_rod is the dependable alternative.
 """
 
 import math
