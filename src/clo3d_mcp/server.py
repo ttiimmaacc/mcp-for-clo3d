@@ -109,6 +109,69 @@ def view_patterns(pattern_index: int | None = None) -> list:
             "%d pieces, %d seams" % (len(summary["pieces"]), len(summary["seams"]))]
 
 
+# ─── Collision Objects (rods, rails, props) ────────────────────────────────
+
+
+@mcp.tool()
+def get_cloth_bounds() -> dict:
+    """3D bounding box (mm) of all cloth: min/max [x, y, z]. CLO's 3D axes: Y is up, Z points
+    towards the front view camera, X to the avatar's left. Use it to place rods and props."""
+    return _send("get_cloth_bounds")
+
+
+@mcp.tool()
+def add_rod(center: list[float], length: float, diameter: float = 25.0, axis: str = "x") -> dict:
+    """Add a cylinder (curtain rod, rail, hanger bar...) that cloth collides with.
+
+    It is imported as a collision object (CLO treats it like an avatar), exactly at `center`.
+    For a rod-pocket curtain: run the rod along x at the height of the pocket.
+
+    Args:
+        center: [x, y, z] centre in mm (see get_cloth_bounds for where the cloth is).
+        length: Length in mm.
+        diameter: Diameter in mm.
+        axis: Direction of the rod: "x" (left-right), "y" (up-down) or "z" (front-back).
+    """
+    from clo3d_mcp.shapes import cylinder_obj
+    path = os.path.join(_work_dir("objects"), "rod_%d.obj" % int(time.time() * 1000))
+    with open(path, "w") as f:
+        f.write(cylinder_obj(center, length, diameter, axis))
+    result = _send("import_obj", {"file_path": path, "object_type": 0})
+    result.update({"center": center, "length": length, "diameter": diameter, "axis": axis})
+    return result
+
+
+@mcp.tool()
+def add_box(center: list[float], size: list[float]) -> dict:
+    """Add a box that cloth collides with (a table, shelf, bed or window sill...).
+
+    Args:
+        center: [x, y, z] centre in mm.
+        size: [width_x, height_y, depth_z] in mm.
+    """
+    from clo3d_mcp.shapes import box_obj
+    path = os.path.join(_work_dir("objects"), "box_%d.obj" % int(time.time() * 1000))
+    with open(path, "w") as f:
+        f.write(box_obj(center, size))
+    result = _send("import_obj", {"file_path": path, "object_type": 0})
+    result.update({"center": center, "size": size})
+    return result
+
+
+@mcp.tool()
+def import_collision_object(file_path: str, keep_position: bool = True, scale: float = 1.0) -> dict:
+    """Import your own OBJ (e.g. a modelled curtain rail or furniture) as an object cloth
+    collides with. Units are mm unless scale is set (e.g. 10 for a model in cm).
+
+    Args:
+        file_path: Absolute path to the .obj file.
+        keep_position: Keep the file's coordinates (False: CLO drops it onto the ground).
+        scale: Scale factor applied on import.
+    """
+    return _send("import_obj", {"file_path": file_path, "object_type": 0,
+                                "align_to_ground": not keep_position, "scale": scale})
+
+
 # ─── Checkpoints (CLO's API has no undo) ───────────────────────────────────
 
 

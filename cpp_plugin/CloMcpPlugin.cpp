@@ -512,6 +512,48 @@ std::map<std::string, Handler> BuildHandlers()
 		bool ok = ext == ".avac" ? IMPORT_API->ImportAVAC(path, p.str("apf_path", "")) : IMPORT_API->ImportFile(path);
 		return Value::object().set("imported", ok).set("file_path", path).set("avatar_count", EXPORT_API->GetAvatarCount());
 	};
+
+	// -- Collision objects --
+	// ImportOBJ with explicit options never shows the import dialog. As an avatar (type 0) the
+	// mesh becomes something cloth collides with; bAutoTranslate=false keeps the file's own
+	// coordinates (mm), so generated rods land exactly where they were placed.
+	h["import_obj"] = [](const Value& p) {
+		std::string path = p.str("file_path");
+		int type = I(p, "object_type", 0);
+		if (type < 0 || type > 2)
+			throw std::runtime_error("object_type must be 0 (avatar/collision), 1 (trim) or 2 (garment)");
+		Marvelous::ImportExportOption opt;
+		opt.ImportObjectType = type;
+		opt.bAutoTranslate = p.boolean("align_to_ground", false);
+		opt.scale = (float)p.num("scale", 1.0);
+		unsigned int before = EXPORT_API->GetAvatarCount();
+		bool ok = IMPORT_API->ImportOBJ(path, opt);
+		return Value::object().set("imported", ok).set("file_path", path).set("object_type", type)
+			.set("avatar_count_before", before).set("avatar_count", EXPORT_API->GetAvatarCount());
+	};
+	// Bounding box of all simulated cloth in 3D (mm), from GetClothPositions.
+	h["get_cloth_bounds"] = [](const Value&) {
+		std::vector<float> positions;
+		UTILITY_API->GetClothPositions(positions);
+		size_t n = positions.size() / 3;
+		if (n == 0)
+			return Value::object().set("vertex_count", 0);
+		float lo[3] = {positions[0], positions[1], positions[2]}, hi[3] = {lo[0], lo[1], lo[2]};
+		for (size_t i = 0; i < n; ++i)
+			for (int k = 0; k < 3; ++k)
+			{
+				float v = positions[i * 3 + k];
+				lo[k] = v < lo[k] ? v : lo[k];
+				hi[k] = v > hi[k] ? v : hi[k];
+			}
+		Value mn = Value::array(), mx = Value::array();
+		for (int k = 0; k < 3; ++k)
+		{
+			mn.a.push_back(lo[k]);
+			mx.a.push_back(hi[k]);
+		}
+		return Value::object().set("vertex_count", (double)n).set("min", mn).set("max", mx);
+	};
 	h["import_fabric"] = [](const Value& p) {
 		std::string path = p.str("file_path");
 		unsigned int index = FABRIC_API->AddFabric(path);
