@@ -645,20 +645,90 @@ def set_fabric_information(fabric_index: int, information: dict[str, str] | None
 
 @mcp.tool()
 def export_fabric(fabric_index: int, file_path: str) -> dict:
-    """Save a fabric as .jfab (JSON, editable) or .zfab.
+    """Save a fabric as a .zfab file (CLO 2025.2 refuses .jfab here; the .fab inside is binary).
 
     Args:
         fabric_index: Fabric to export.
-        file_path: Absolute output path ending in .jfab or .zfab.
+        file_path: Absolute output path ending in .zfab.
     """
+    if file_path.lower().endswith(".jfab"):
+        raise ValueError("CLO exports fabrics only as .zfab; use set_fabric_physics to change physical properties")
     return _send("export_fabric", {"fabric_index": fabric_index, "file_path": file_path})
 
 
 @mcp.tool()
 def apply_fabric_json(fabric_index: int, file_path: str) -> dict:
-    """Overwrite all of a fabric's properties from a .jfab file (e.g. one saved with
-    export_fabric and edited)."""
+    """Apply a .jfab file (CLO's JSON fabric format, see JFABSpec.json in the CLO SDK) to a
+    fabric. Keys the file leaves out at the top level keep their values (colour, texture,
+    content), but a "mapPhysical" block replaces the whole physical set: its missing keys reset
+    to CLO's defaults, and a missing "qsFabricName" clears the name. set_fabric_physics
+    handles this for you."""
     return _send("change_fabric_with_json", {"fabric_index": fabric_index, "file_path": file_path})
+
+
+@mcp.tool()
+def set_fabric_physics(
+    fabric_index: int,
+    weight_gsm: float = 300.0,
+    thickness_mm: float = 0.5,
+    stretch_weft: float = 100000.0,
+    stretch_warp: float = 100000.0,
+    shear: float = 10000.0,
+    bending_weft: float = 2000.0,
+    bending_warp: float = 2000.0,
+    bending_bias: float = 2000.0,
+    buckling_ratio: float = 0.8,
+    buckling_stiffness: float = 0.8,
+    friction: float = 0.03,
+    internal_damping: float = 0.0001,
+    content: str | None = None,
+    property_name: str = "Custom",
+) -> dict:
+    """Set all of a fabric's physical properties (how it stretches, bends and hangs), keeping
+    its colour, texture and name. CLO cannot report a fabric's current values (only weight
+    and thickness, via get_fabric_info), so every value is written: the defaults are CLO's
+    documented defaults, not the fabric's own. Pass real values for a specific cloth, or keep
+    a library fabric (add_fabric) whose physics were measured.
+
+    Args:
+        fabric_index: Fabric to change.
+        weight_gsm: Weight in g/m2.
+        thickness_mm: Thickness in mm.
+        stretch_weft: Stretch stiffness across the grain (weft); higher = less stretch.
+        stretch_warp: Stretch stiffness along the grain (warp).
+        shear: Shear stiffness (bias stretch).
+        bending_weft: Bending stiffness across the grain; higher = stiffer, fewer folds.
+        bending_warp: Bending stiffness along the grain.
+        bending_bias: Bending stiffness on the bias.
+        buckling_ratio: Buckling ratio (all directions).
+        buckling_stiffness: Buckling stiffness (all directions).
+        friction: Friction.
+        internal_damping: Internal damping.
+        content: Optionally also set the content label, e.g. "60% Cotton, 40% Linen".
+        property_name: Name for this set of physical properties.
+    """
+    name = _send("get_fabric_info", {"fabric_index": fabric_index}).get("name") or "Fabric %d" % fabric_index
+    physical = {
+        "enFabricType": 0, "fBhK": bending_bias, "fBuK": bending_weft, "fBvK": bending_warp,
+        "fBhLR": buckling_ratio, "fBuLR": buckling_ratio, "fBvLR": buckling_ratio,
+        "fBucklingStiffnessH": buckling_stiffness, "fBucklingStiffnessU": buckling_stiffness,
+        "fBucklingStiffnessV": buckling_stiffness, "fDensity": weight_gsm / 1e6, "fFriction": friction,
+        "fHK": shear, "fIDS": internal_damping, "fSuK": stretch_weft, "fSvK": stretch_warp,
+        "fThickness": thickness_mm, "listNonlinearHK": [], "listNonlinearSuK": [], "listNonlinearSvK": [],
+        "qsPhysicalPropertyName": property_name, "qsPhysicalPropertyNameUTF8": property_name,
+    }
+    jfab = {"qsFabricName": name, "qsFabricNameUTF8": name, "uiFabricVersion": 100, "uiVersion": 100,
+            "mapPhysical": physical}
+    if content is not None:
+        jfab.update(fabricContent=content, fabricContentUTF8=content)
+    path = os.path.join(_work_dir("fabrics"), "fabric_%d_%d.jfab" % (fabric_index, int(time.time() * 1000)))
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(jfab, f, indent=1, ensure_ascii=False)
+    changed = _send("change_fabric_with_json", {"fabric_index": fabric_index, "file_path": path}).get("changed")
+    info = _send("get_fabric_info", {"fabric_index": fabric_index})
+    return {"changed": changed, "fabric_index": fabric_index, "name": info.get("name"),
+            "weight": info["information"].get("Weight"), "thickness": info["information"].get("Thickness"),
+            "content": info["information"].get("Content"), "jfab": path}
 
 
 @mcp.tool()
