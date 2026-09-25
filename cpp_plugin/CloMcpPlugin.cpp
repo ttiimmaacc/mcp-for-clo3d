@@ -429,13 +429,54 @@ std::map<std::string, Handler> BuildHandlers()
 		std::string out = EXPORT_API->ExportThumbnail3D(path);
 		return Value::object().set("exported", !out.empty()).set("file_path", out.empty() ? path : out);
 	};
+
+	// -- Visual feedback --
+	// ExportSnapshot3D opens CLO's snapshot dialog, so captures use ExportThumbnail3D (no dialog)
+	// after pointing the camera. Camera indices from the SDK: 0 bottom, 1 3/4 right, 2 front,
+	// 3 3/4 left, 4 right, 5 top, 6 left, 7 focus zoom, 8 back, 9 zoom extents all.
+	h["capture_3d"] = [](const Value& p) {
+		int camera = I(p, "camera", -1);
+		if (camera < -1 || camera > 9)
+			throw std::runtime_error("camera must be 0-9, or -1 to keep the current view");
+		if (camera >= 0)
+			UTILITY_API->SetCamViewPoint(camera);
+		std::string path = p.str("file_path");
+		std::string out = EXPORT_API->ExportThumbnail3D(path);
+		if (out.empty())
+			throw std::runtime_error("CLO did not export the 3D view");
+		return Value::object().set("file_path", out).set("camera", camera);
+	};
+	h["set_fit_map"] = [](const Value& p) {
+		std::string mode = p.str("mode");
+		if (mode != "off" && mode != "strain" && mode != "stress")
+			throw std::runtime_error("mode must be \"off\", \"strain\" or \"stress\"");
+		UTILITY_API->SetStrainMapStatus(mode == "strain");
+		UTILITY_API->SetStressMapStatus(mode == "stress");
+		return Value::object()
+			.set("strain_map", UTILITY_API->GetStrainMapStatus())
+			.set("stress_map", UTILITY_API->GetStressMapStatus());
+	};
+	h["get_fit_map"] = [](const Value&) {
+		return Value::object()
+			.set("strain_map", UTILITY_API->GetStrainMapStatus())
+			.set("stress_map", UTILITY_API->GetStressMapStatus());
+	};
+	// ExportSnapshot3D opens CLO's snapshot dialog, which would block the listener until a person
+	// closes it, so snapshots are taken per camera view without a dialog.
 	h["export_snapshot"] = [](const Value& p) {
 		std::string path = p.str("file_path");
-		std::vector<std::vector<std::string>> out = EXPORT_API->ExportSnapshot3D(path);
+		std::string base = path.size() > 4 && path.substr(path.size() - 4) == ".png" ? path.substr(0, path.size() - 4) : path;
+		const std::pair<const char*, int> views[] = {{"front", 2}, {"back", 8}, {"left", 6}, {"right", 4}};
 		Value files = Value::array();
-		for (const auto& group : out)
-			files.a.push_back(Value::from(group));
-		return Value::object().set("exported", !out.empty()).set("file_path", path).set("file_paths", files);
+		for (const auto& view : views)
+		{
+			UTILITY_API->SetCamViewPoint(view.second);
+			std::string out = EXPORT_API->ExportThumbnail3D(base + "_" + view.first + ".png");
+			if (!out.empty())
+				files.a.push_back(out);
+		}
+		UTILITY_API->SetCamViewPoint(2);
+		return Value::object().set("exported", !files.a.empty()).set("file_paths", files);
 	};
 	h["export_turntable"] = [](const Value& p) {
 		std::string path = p.str("file_path");

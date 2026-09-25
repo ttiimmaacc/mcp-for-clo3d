@@ -5,17 +5,25 @@ Bridges Claude/Cursor and CLO3D via the Model Context Protocol.
 Communicates with the native CLO plug-in (cpp_plugin/) through a shared file directory.
 """
 
-from mcp.server.fastmcp import FastMCP
+import json
+import os
+import re
+import time
+
+from mcp.server.fastmcp import FastMCP, Image
 from clo3d_mcp.connection import get_connection, CLO3DConnectionError
 from clo3d_mcp.geometry import summarize
+from clo3d_mcp.visuals import render_patterns
 
 mcp = FastMCP(
     "clo3d",
     instructions="Control CLO3D — the industry-standard 3D garment design software. "
     "Create patterns, manage fabrics, run simulations, export 3D models, and more. "
-    "Lines are addressed by index: call get_pattern_geometry first to see each piece's "
-    "numbered outline lines, internal shapes and existing seams before sewing, adding "
-    "elastic, topstitch or seam taping. Pattern coordinates are millimetres in the 2D window.",
+    "Lines are addressed by index: call get_pattern_geometry (or view_patterns for a labelled "
+    "picture) to see each piece's numbered lines, internal shapes and seams before sewing, "
+    "adding elastic, topstitch or seam taping. Pattern coordinates are millimetres in the 2D "
+    "window. CLO has no undo: call save_checkpoint before risky edits. After simulating, "
+    "look at the result with capture_3d (optionally with fit_map='strain') before continuing.",
 )
 
 
@@ -28,6 +36,140 @@ def _send(command: str, params: dict | None = None) -> dict:
 def _given(**params) -> dict:
     """Drop parameters the caller left unset."""
     return {k: v for k, v in params.items() if v is not None}
+
+
+def _work_dir(name: str) -> str:
+    """A folder next to the request files (CLO and the server both see it)."""
+    path = os.path.join(get_connection().comm_dir, name)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+# CLO's camera presets (SDK: SetCamViewPoint)
+CAMERA_VIEWS = {
+    "front": 2, "back": 8, "left": 6, "right": 4, "three_quarter_left": 3,
+    "three_quarter_right": 1, "top": 5, "bottom": 0, "zoom_all": 9, "current": -1,
+}
+
+
+# ─── See the Result ────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def capture_3d(views: list[str] | None = None, fit_map: str | None = None) -> list:
+    """Look at the garment: capture CLO's 3D window from one or more camera views.
+
+    Use after simulating or editing to check the result (e.g. twisted seams, pieces in the
+    wrong place, fabric through the avatar). Moves CLO's 3D camera.
+
+    Args:
+        views: Any of front, back, left, right, three_quarter_left, three_quarter_right, top,
+            bottom, zoom_all, current (default: ["front"]).
+        fit_map: "strain" or "stress" to show CLO's fit map in the capture (red = tight or
+            overstretched), "off" to hide it, or omit to leave the display as it is.
+    """
+    views = views or ["front"]
+    unknown = [v for v in views if v not in CAMERA_VIEWS]
+    if unknown:
+        raise ValueError("unknown view(s) %s; use %s" % (unknown, ", ".join(CAMERA_VIEWS)))
+    if fit_map is not None:
+        _send("set_fit_map", {"mode": fit_map})
+    folder = _work_dir("captures")
+    content = []
+    for view in views:
+        path = os.path.join(folder, "%s_%d.png" % (view, int(time.time() * 1000)))
+        result = _send("capture_3d", {"camera": CAMERA_VIEWS[view], "file_path": path})
+        written = result["file_path"]
+        with open(written, "rb") as f:
+            data = f.read()
+        content.append(Image(data=data, format=os.path.splitext(written)[1].lstrip(".").lower() or "png"))
+        content.append("view: %s" % view)
+    return content
+
+
+@mcp.tool()
+def set_fit_map(mode: str) -> dict:
+    """Show CLO's fit map in the 3D window: "strain" (stretch %), "stress" (pressure) or "off"."""
+    return _send("set_fit_map", {"mode": mode})
+
+
+@mcp.tool()
+def view_patterns(pattern_index: int | None = None) -> list:
+    """Picture of the 2D pattern pieces with every outline line numbered and seams coloured.
+
+    Blue numbers are line_index values for sewing, elastic, topstitch and seam taping; "sN"
+    marks lines sewn by seam N; grey lines are internal lines. Pair it with
+    get_pattern_geometry for exact lengths and coordinates.
+
+    Args:
+        pattern_index: Draw only this piece (default: all pieces).
+    """
+    summary = summarize(_send("get_pattern_geometry"), pattern_index, include_points=True)
+    return [Image(data=render_patterns(summary), format="png"),
+            "%d pieces, %d seams" % (len(summary["pieces"]), len(summary["seams"]))]
+
+
+# ─── Checkpoints (CLO's API has no undo) ───────────────────────────────────
+
+
+def _checkpoint_path(name: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or "checkpoint"
+    return os.path.join(_work_dir("checkpoints"), safe + ".zprj")
+
+
+@mcp.tool()
+def save_checkpoint(name: str = "checkpoint") -> dict:
+    """Save the whole scene so it can be restored later. CLO's API has no undo, so save one
+    before risky edits (sewing, deleting lines, simulating). Reusing a name overwrites it.
+    """
+    before = _send("get_project_info")
+    path = _checkpoint_path(name)
+    result = _send("save_file", {"file_path": path})
+    after = _send("get_project_info")
+    meta = {"name": name, "file": result.get("file_path") or path, "saved_at": time.time(),
+            "project_name": before.get("project_name"), "original_path": before.get("project_path")}
+    with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=1)
+    out = {"saved": result.get("saved", False), "checkpoint": name, "file": meta["file"]}
+    if after.get("project_path") != before.get("project_path"):
+        out["note"] = ("CLO now treats the checkpoint as the open project; save your work with "
+                       "save_project(%r) when done." % before.get("project_path"))
+    return out
+
+
+@mcp.tool()
+def list_checkpoints() -> dict:
+    """List saved checkpoints, newest first."""
+    folder = _work_dir("checkpoints")
+    items = []
+    for entry in os.listdir(folder):
+        if entry.endswith(".json"):
+            with open(os.path.join(folder, entry), encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["saved"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(meta.get("saved_at", 0)))
+            items.append(meta)
+    items.sort(key=lambda m: m.get("saved_at", 0), reverse=True)
+    return {"checkpoints": items}
+
+
+@mcp.tool()
+def restore_checkpoint(name: str) -> dict:
+    """Reopen a checkpoint, replacing the current scene (unsaved changes are lost).
+
+    Afterwards CLO's open file is the checkpoint copy; save with save_project to the
+    original_path returned here to keep working on the real file.
+    """
+    path = _checkpoint_path(name)
+    if not os.path.exists(path):
+        raise ValueError("no checkpoint named %r; see list_checkpoints" % name)
+    meta_file = os.path.splitext(path)[0] + ".json"
+    meta = {}
+    if os.path.exists(meta_file):
+        with open(meta_file, encoding="utf-8") as f:
+            meta = json.load(f)
+    result = _send("open_file", {"file_path": path})
+    return {"restored": result.get("opened", False), "checkpoint": name,
+            "original_path": meta.get("original_path"), "project": _send("get_project_info")}
 
 
 # ─── Scene Tools ───────────────────────────────────────────────────────────
@@ -311,10 +453,12 @@ def export_thumbnail(file_path: str, width: int = 512, height: int = 512) -> dic
 
 @mcp.tool()
 def export_snapshot(file_path: str) -> dict:
-    """Export multi-view snapshot images of the 3D garment.
+    """Save front, back, left and right images of the 3D window as PNG files.
+
+    To look at the garment yourself, use capture_3d instead (returns the images).
 
     Args:
-        file_path: Absolute path (directory or base name) for snapshot images.
+        file_path: Base path; files are saved as <base>_front.png, <base>_back.png, ...
     """
     return _send("export_snapshot", {"file_path": file_path})
 

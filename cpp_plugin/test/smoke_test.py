@@ -60,6 +60,8 @@ def main():
         ("bad line index", "sew_lines", {"pattern_a": 0, "line_a": 3, "pattern_b": 1, "line_b": 0}, "out of range"),
         ("nothing to set", "set_pattern_state", {"pattern_index": 0}, "no state given"),
         ("bad shape style", "place_pattern", {"pattern_index": 0, "shape_style": "Round"}, "Flat"),
+        ("bad fit map", "set_fit_map", {"mode": "heat"}, "strain"),
+        ("bad camera", "capture_3d", {"camera": 12, "file_path": "x.png"}, "camera must be 0-9"),
     ]:
         try:
             conn.send_command(cmd, params, retries=1)
