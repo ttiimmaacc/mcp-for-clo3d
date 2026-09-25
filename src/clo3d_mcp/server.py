@@ -205,6 +205,13 @@ def add_box(center: list[float], size: list[float]) -> dict:
 
 
 @mcp.tool()
+def remove_collision_object(index: int) -> dict:
+    """Delete a collision object or avatar by index (see get_avatars; rods and boxes are listed
+    there in the order they were added)."""
+    return _send("delete_objects", {"indices": [index]})
+
+
+@mcp.tool()
 def import_collision_object(file_path: str, keep_position: bool = True, scale: float = 1.0) -> dict:
     """Import your own OBJ (e.g. a modelled curtain rail or furniture) as an object cloth
     collides with. Units are mm unless scale is set (e.g. 10 for a model in cm).

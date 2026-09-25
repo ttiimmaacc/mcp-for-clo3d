@@ -77,19 +77,30 @@ def make_rod_pocket(send, pattern_index, pocket_depth=150.0, rod_diameter=30.0,
     seam_fold = send("sew_lines", {"pattern_a": strip, "line_a": 2, "pattern_b": pattern_index, "line_b": 0,
                                    "direction_a": True, "direction_b": False, "internal_shape_b": fold_shape})
 
-    # 3. fine mesh, then form the tube with the panel held still
+    # 3. fine mesh; hold the panel still; one step so CLO reports where the panel is
     strip_mesh, panel_mesh = max(3.0, rod_diameter / 5.0), max(5.0, rod_diameter / 3.0)
     send("set_pattern_state", {"pattern_index": strip, "particle_distance": strip_mesh})
     send("set_pattern_state", {"pattern_index": pattern_index, "particle_distance": panel_mesh, "frozen": True})
-    for _ in range(3):
-        send("simulate", {"steps": 20})
-    say("tube formed")
-
-    # 4. measure the panel plane and the tube in three slices across the width
+    send("simulate", {"steps": 1})
     below = send("get_cloth_bounds", {"min": [x0 + 50, fold_y - 400, -1e6], "max": [x1 - 50, fold_y - 100, 1e6]})
     if not below.get("vertex_count"):
         raise RuntimeError("CLO reported no cloth below the pocket; is the panel simulated?")
     plane_z = (below["min"][2] + below["max"][2]) / 2.0
+
+    # 4. A strip starting in the panel's plane folds either way (it buckled both ways across
+    #    the width in testing). A temporary guide rod in front of its hinge pushes it back
+    #    everywhere, so the tube forms on the back; the guide is removed afterwards.
+    guide_index = send("get_avatars")["count"]
+    guide_d = 20.0
+    send("__add_rod__", {"center": [mid_x, top_y + 25.0, plane_z + guide_d / 2 + 3.0],
+                         "length": width + 2 * rod_overhang, "diameter": guide_d})
+    for _ in range(3):
+        send("simulate", {"steps": 20})
+    send("delete_objects", {"indices": [guide_index]})
+    send("simulate", {"steps": 5})
+    say("tube formed")
+
+    # 5. measure the tube in three slices across the width
     region_y = [fold_y - 50, top_y + pocket_depth + 50]
     sides = {}
     for side, (zlo, zhi) in {1: (plane_z + PLANE_TOLERANCE, plane_z + 1000), -1: (plane_z - 1000, plane_z - PLANE_TOLERANCE)}.items():
@@ -106,7 +117,7 @@ def make_rod_pocket(send, pattern_index, pocket_depth=150.0, rod_diameter=30.0,
     rod_y, rod_z, clearance = tube_center(slices, plane_z, fold_y, rod_diameter)
     say("tube measured: clearance %.0f mm" % clearance)
 
-    # 5. rod inside the tube, then let the panel hang
+    # 6. rod inside the tube, then let the panel hang
     rod = {"center": [mid_x, rod_y, rod_z], "length": width + 2 * rod_overhang, "diameter": rod_diameter}
     send("__add_rod__", rod)
     send("simulate", {"steps": 20})
@@ -116,7 +127,7 @@ def make_rod_pocket(send, pattern_index, pocket_depth=150.0, rod_diameter=30.0,
         send("simulate", {"steps": min(50, remaining)})
         remaining -= 50
 
-    # 6. check it hangs across the whole width (catches a pocket that holds only at the ends)
+    # 7. check it hangs across the whole width (catches a pocket that holds only at the ends)
     whole = send("get_cloth_bounds", {})
     middle = send("get_cloth_bounds", {"min": [mid_x - 50, -1e6, -1e6], "max": [mid_x + 50, 1e6, 1e6]})
     top, middle_top = whole["max"][1], middle.get("max", [0, 0, 0])[1]

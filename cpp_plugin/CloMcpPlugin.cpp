@@ -531,6 +531,24 @@ std::map<std::string, Handler> BuildHandlers()
 		return Value::object().set("imported", ok).set("file_path", path).set("object_type", type)
 			.set("avatar_count_before", before).set("avatar_count", EXPORT_API->GetAvatarCount());
 	};
+	// Remove collision objects / avatars by index (e.g. a temporary guide rod).
+	h["delete_objects"] = [](const Value& p) {
+		const Value* list = p.find("indices");
+		if (!list || list->type != Value::Array || list->a.empty())
+			throw std::runtime_error("'indices' must list the object (avatar) indices to delete");
+		int count = (int)EXPORT_API->GetAvatarCount();
+		std::vector<int> indices;
+		for (const Value& v : list->a)
+		{
+			int index = (int)v.n;
+			if (index < 0 || index >= count)
+				throw std::runtime_error("object index " + std::to_string(index) + " is out of range (" +
+										 std::to_string(count) + " objects)");
+			indices.push_back(index);
+		}
+		bool ok = UTILITY_API->DeleteAvatar(indices);
+		return Value::object().set("deleted", ok).set("object_count", EXPORT_API->GetAvatarCount());
+	};
 	// Bounding box of simulated cloth in 3D (mm), from GetClothPositions; optionally only the
 	// vertices inside a region box (e.g. a slice through the middle of a pocket).
 	h["get_cloth_bounds"] = [](const Value& p) {
