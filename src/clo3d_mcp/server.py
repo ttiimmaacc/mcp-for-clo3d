@@ -1579,8 +1579,9 @@ def _layered_piece(base: int, points, layer: int, fabric_index, name: str, place
 def add_hem(pattern_index: int, line_index: int, width: float, layer: int = -1,
             fabric_index: int | None = None, place_flat: bool = True) -> dict:
     """Hem a straight edge: adds the turned-back layer as a strip covering the hem area on the
-    reverse side, sewn along the edge and along a new hem line (CLO's API cannot fold cloth;
-    fold angles are ignored by the simulation). Gives the doubled fabric at the edge. The
+    reverse side, sewn along the edge and along a new hem line (cloth cannot be folded this way:
+    a fold angle only bends it about 20 degrees, even at full strength). Gives the doubled fabric
+    at the edge. The
     pattern's edge is the finished edge, so draw pieces at their finished size.
 
     Args:

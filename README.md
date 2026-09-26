@@ -159,7 +159,7 @@ Needed for any CLO version other than the one the release was built for.
 | Scene | `get_project_info`, `new_project`, `open_file`, `save_project`, `get_garment_info`, `import_file` |
 | See the result | `capture_3d`: the 3D window from front, back, sides, 3/4 or top, returned to the assistant as images, optionally with CLO's `strain` or `stress` fit map. `view_patterns`: picture of the 2D pieces with every line numbered and seams coloured. `set_fit_map` |
 | Collision objects | `add_rod`, `add_box`, `list_collision_objects`, `remove_collision_object`, `import_collision_object`, `get_cloth_bounds`. CLO keeps one avatar, so rods and boxes share one collision mesh, and they won't replace a human avatar unless asked |
-| Hems & appliqué | `add_hem`: the turned-back layer of a hem as a strip on the reverse, sewn at the edge and the hem line (CLO's simulation ignores fold angles, so cloth cannot be folded through the API). `add_applique`: a patch sewn where it sits, optionally with its reverse copy |
+| Hems & appliqué | `add_hem`: the turned-back layer of a hem as a strip on the reverse, sewn at the edge and the hem line (cloth cannot be folded this way: a fold angle only bends it about 20° even at full strength, however it is set). `add_applique`: a patch sewn where it sits, optionally with its reverse copy |
 | Plotting & PDF | `export_pattern_sheet` (vector PDF at exactly 1:1, or PNG; pattern window or print layout; seam allowance, notches, grain lines, names, annotations...), `nest_patterns` and `marker_report` (marker length, width, utilisation per fabric, measured from the 1:1 layout), `set_fabric_width`, `set_nesting` (spacing, 1/2/4-way grain, fixed pieces), `add_pattern_annotation`, `get_pattern_annotations`, `get_print_options`. CLO's print layout exports one fabric at a time, and in a fresh CLO session the API's nesting only works after Printing Layout mode has been opened once; `clo_ui_nest_all_fabrics` / `nest_patterns(allow_ui_click=True)` click CLO's "Nest All Fabrics" through Windows UI Automation as a fallback |
 | CAD / DXF | `export_dxf`: AAMA, ASTM or Gerber DXF without a dialog, read back as a check (piece names, sizes, quantities, outline boxes) |
 | Topstitch styles | `create_topstitch_style` (stitch length, thread thickness, offset: CLO's API cannot set these, so a style saved from CLO once is copied with the values changed and imported), `get_topstitch_style`, `set_topstitch_style` (name, colour, lines) |
@@ -184,10 +184,11 @@ every pattern and line index before calling CLO, because CLO doesn't check them.
 tools report how many internal shapes CLO actually created, because CLO creates nothing, without
 an error, for requests it can't do.
 
-**Not possible through CLO's API (2025.2):** creating pins (they can only be removed), pleats or
-fold angles, free 3D move or rotate of a piece (placement goes through avatar arrangement points),
+**Not possible through CLO's API (2025.2):** creating pins (they can only be removed), folding
+cloth or pleats (a fold angle on a line only bends the cloth about 20° even at full strength,
+whether set through the API, CLO's Property Editor or its Fold Arrangement tool), free 3D move or rotate of a piece (placement goes through avatar arrangement points),
 and editing or removing an existing seam. Two SDK functions exist but did nothing in CLO 2025.2 testing, so they aren't exposed: `MovePatternPoint` (points never move) and `DistribueInternalLinesbetweenSegments` (created nothing on any pair of lines). To hold pieces in place, freeze or strengthen them. For
-pleats, draw fold lines with the internal-line tools and let the simulation fold them.
+turned-back layers such as hems, use `add_hem`, which models the fold as a second layer.
 
 ## How it works
 

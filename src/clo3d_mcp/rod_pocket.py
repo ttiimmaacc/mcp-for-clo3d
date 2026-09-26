@@ -15,8 +15,9 @@ Why it is unreliable (controlled experiments, plain 525 x 1500 panels, one and t
 the seams pull the strip's free edge down to the fold line within a few steps, so the strip
 crumples into a lump instead of rolling into a loop, on whichever side it happens to go. It went
 away from the rod in most runs, including with the strip on layer +1 and with the rod 20 mm clear
-of it. A dependable pocket needs a fold angle on the fold line or a strip arranged around the
-rod, and CLO's API offers neither; hang_on_rod is the dependable alternative.
+of it. A fold angle on the fold line does not help (it only bends cloth about 20 degrees, see
+layers.py), and the API cannot arrange a strip around the rod; hang_on_rod is the dependable
+alternative.
 """
 
 import math

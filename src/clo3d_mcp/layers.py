@@ -1,8 +1,9 @@
 """Pieces that lie on top of another piece and are sewn to it where they sit: hems and appliqué.
 
-CLO's API cannot fold cloth: fold angles on internal lines are stored (pattern JSON) but the
-simulation ignores them (tested in CLO 2025.2.236 at 0, 90 and 360 degrees, strength 5-100).
-So a hem is modelled as its turned-back layer: a strip covering the hem area on the reverse
+Cloth cannot be folded from outside CLO's UI: a fold angle on an internal line acts only as a weak
+bend (tested in CLO 2025.2.236 on a hanging 100 mm flap: angle 0 at strength 100 tilted it about
+20 degrees and it kept swaying; the same whether set through the pattern JSON, the Property
+Editor or CLO's Fold Arrangement tool; the SDK has no fold arrangement call). So a hem is modelled as its turned-back layer: a strip covering the hem area on the reverse
 layer, sewn along the edge and along the hem line. Nothing has to move into place, so it is
 stable from the first step, the same way appliqué patches are.
 """
