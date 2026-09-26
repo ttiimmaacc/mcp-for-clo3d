@@ -1033,10 +1033,10 @@ def set_nesting(buffer_spacing_mm: float | None = None, colorways: list[int] | N
     return _send("get_nesting")
 
 
-LAYOUT_SETUP = ("CLO's print layout is empty: switch CLO to Printing Layout mode, then call "
-                "clo_ui_nest_all_fabrics (or nest_patterns with allow_ui_click=True), or click Nest All "
-                "Fabrics in CLO's Print Layout Editor yourself; the API's nesting only works on a layout "
-                "CLO has set up")
+LAYOUT_SETUP = ("CLO's print layout is empty: switch CLO to Printing Layout mode once in this session "
+                "(mode dropdown at the top right) and call nest_patterns again; if it stays empty, use "
+                "nest_patterns(allow_ui_click=True) or clo_ui_nest_all_fabrics, which click CLO's Nest All "
+                "Fabrics button")
 
 
 def _markers():
@@ -1093,10 +1093,11 @@ def nest_patterns(buffer_spacing_mm: float | None = None, fabric_index: int | No
     along the fabric, width, pieces and utilisation (measured from the exported 1:1 layout;
     CLO's own fabric length value did not match the layout in testing).
 
-    In testing the API's nesting sometimes did nothing until CLO's own nesting had run once in
-    that CLO session (seen with a fresh session and fabrics added through the API; not in every
-    fresh session). With allow_ui_click, an empty layout is then set up by clicking "Nest All
-    Fabrics" in CLO (needs CLO in Printing Layout mode); otherwise the error says what to do.
+    In a fresh CLO session the API's nesting leaves the layout empty until CLO's Printing Layout
+    mode has been opened once (tested: empty before the switch, working right after it and for
+    the rest of the session, also back in Simulation mode). If it is still empty,
+    allow_ui_click clicks "Nest All Fabrics" in CLO (needs Printing Layout mode); otherwise the
+    error says what to do.
 
     Args:
         buffer_spacing_mm: Space between pieces.
