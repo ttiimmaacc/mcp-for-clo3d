@@ -228,8 +228,10 @@ the result.
 
 ## Credits and licence
 
-MIT, see [LICENSE](LICENSE). The Python MCP server started from
-[Ubani-Studio/clo3d-mcp](https://github.com/Ubani-Studio/clo3d-mcp) by Violet Sphinx (MIT).
-This project replaces its Python CLO plug-in with the native plug-in.
+Licensed under MIT; see [LICENSE](LICENSE).
+
+The Python MCP server began as [Ubani-Studio/clo3d-mcp](https://github.com/Ubani-Studio/clo3d-mcp)
+by Violet Sphinx (MIT). This project has since grown into a separate codebase: its Python CLO
+plug-in was replaced by a new native C++ plug-in, and most tools were added or rewritten.
 
 CLO's SDK is **not** included and is not covered by this licence. See [NOTICE](NOTICE).
