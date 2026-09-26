@@ -908,6 +908,244 @@ def export_tech_pack(file_path: str) -> dict:
     return _send("export_tech_pack", {"file_path": file_path})
 
 
+# ─── Plotting, Print Layout & DXF ─────────────────────────────────────────
+
+PAPER = {"a4": 0, "a3": 1, "b5": 2, "b4": 3, "letter": 4, "legal": 5, "tabloid": 6, "wide_24in": 7,
+         "wide_36in": 8, "wide_44in": 9, "one_to_one": 10, "custom": 11}
+SHEET_SOURCE = {"pattern": 0, "print_layout": 1}
+GRAIN_MODES = {"1-way": 0, "2-way": 1, "4-way": 2}
+
+
+@mcp.tool()
+def get_print_options(source: str = "print_layout") -> dict:
+    """Current 2D export settings (paper, orientation, resolution and what is shown) for the
+    pattern window ("pattern") or the print layout ("print_layout")."""
+    return _send("get_print_options", {"mode": SHEET_SOURCE[source]})
+
+
+@mcp.tool()
+def export_pattern_sheet(file_path: str, source: str = "print_layout", paper: str | None = None,
+                         landscape: bool | None = None, width_mm: float | None = None,
+                         height_mm: float | None = None, resolution_dpi: int | None = None,
+                         show: dict[str, bool] | None = None) -> dict:
+    """Export the 2D pattern as a PDF (vector, exactly 1:1: verified in CLO 2025.2) or PNG, by
+    the file's extension, for plotting or printing.
+
+    "print_layout" exports the marker of the fabric shown in CLO's Print Layout Editor (see
+    marker_report): the page is the fabric width by the marker length. It needs the layout set
+    up once in CLO (Printing Layout mode, Auto Nesting). "pattern" exports the pattern window.
+
+    Args:
+        file_path: Absolute path ending in .pdf or .png.
+        source: "print_layout" or "pattern".
+        paper: a4, a3, b5, b4, letter, legal, tabloid, wide_24in, wide_36in, wide_44in,
+            one_to_one or custom (then give width_mm and height_mm). Default: CLO's setting.
+            The PDF stays one 1:1 page whatever the paper (tested with a4: no tiling), so
+            tile it with your plotter or PDF software for small paper.
+        landscape: Paper orientation.
+        width_mm: Paper width for custom paper.
+        height_mm: Paper height for custom paper.
+        resolution_dpi: Resolution for PNG output.
+        show: What to draw, e.g. {"seam_allowance": true, "notches": true, "grain_line": true,
+            "pattern_name": true, "annotations": true}. Keys: outline, internal_lines,
+            graphic_outline, baseline, notches, seam_allowance, symmetry_line, reference_line,
+            pattern_name, annotations, line_length, grain_line, button_holes, seam_taping,
+            measurements_2d, grading_size_name, nest_information, fabric_texture,
+            pattern_texture, graphic_texture.
+    """
+    from clo3d_mcp.plotting import pdf_page_mm
+    if paper is not None and paper not in PAPER:
+        raise ValueError("paper must be one of %s" % ", ".join(PAPER))
+    params = _given(file_path=file_path, mode=SHEET_SOURCE[source], paper_preset=PAPER.get(paper),
+                    orientation=None if landscape is None else int(landscape), width_mm=width_mm,
+                    height_mm=height_mm, resolution=resolution_dpi, show=show)
+    if width_mm is not None or height_mm is not None:
+        params["unit"] = 2  # millimetres
+    result = _send("export_pattern_sheet", params)
+    if not os.path.exists(file_path):  # CLO returns no file list; check the file itself
+        raise RuntimeError(LAYOUT_SETUP if source == "print_layout" else "CLO did not write %s" % file_path)
+    out = {"file_path": file_path, "bytes": os.path.getsize(file_path), "options": result["options"]}
+    if file_path.lower().endswith(".pdf"):
+        with open(file_path, "rb") as f:
+            out["page_mm"] = pdf_page_mm(f.read())
+    return out
+
+
+@mcp.tool()
+def export_dxf(file_path: str, format: str = "aama", metric: bool = True, box_per_piece: bool = False,
+               curves_to_straight: bool = False, optimize_curve_points: bool = False,
+               without_grading: bool = False, without_baselines: bool = False,
+               remove_duplicate_notches: bool = False, scale: float = 1.0, rotate_degrees: float = 0.0) -> dict:
+    """Export the pattern as a DXF for CAD, plotters and cutters (no dialog). Returns the
+    pieces read back from the file (name, size, quantity, outline box in mm) as a check.
+
+    Args:
+        file_path: Absolute path ending in .dxf.
+        format: "aama", "astm" or "gerber" (Gerber-flavoured AAMA).
+        metric: Millimetres (True) or inches.
+        box_per_piece: One bounding box per piece instead of one around all pieces.
+        curves_to_straight: Convert curve points to straight points.
+        optimize_curve_points: Drop curve points very close to others.
+        without_grading: Leave grading out.
+        without_baselines: Only the outlines, without base lines.
+        remove_duplicate_notches: Remove duplicate notches.
+        scale: Scale factor.
+        rotate_degrees: Rotate the pieces.
+    """
+    from clo3d_mcp.plotting import dxf_pieces
+    formats = {"aama": 0, "astm": 1, "gerber": 2}
+    result = _send("export_dxf", {"file_path": file_path, "format": formats[format], "metric": metric,
+                                  "bounding_box": 2 if box_per_piece else 1, "scale": scale,
+                                  "rotate": rotate_degrees, "curves_to_straight": curves_to_straight,
+                                  "optimize_curve_points": optimize_curve_points, "without_grading": without_grading,
+                                  "without_baselines": without_baselines,
+                                  "remove_duplicate_notches": remove_duplicate_notches})
+    path = result.get("file_path") or file_path
+    if not result.get("exported") or not os.path.exists(path):
+        raise RuntimeError("CLO did not write %s" % file_path)
+    with open(path, encoding="latin-1") as f:
+        pieces = dxf_pieces(f.read())
+    return {"file_path": path, "pieces": [{"block": k, "name": v.get("name"), "size": v.get("size"),
+                                           "quantity": v.get("quantity"), "outline_box_mm": v.get("bbox")}
+                                          for k, v in pieces.items()]}
+
+
+@mcp.tool()
+def set_fabric_width(fabric_index: int, width_mm: float) -> dict:
+    """Set a fabric's usable width (the marker width in the print layout), in mm."""
+    return _send("set_fabric_width", {"fabric_index": fabric_index, "width_mm": width_mm})
+
+
+@mcp.tool()
+def set_nesting(buffer_spacing_mm: float | None = None, colorways: list[int] | None = None,
+                pattern_index: int | None = None, grain: str | None = None,
+                fixed_position: list[int] | None = None) -> dict:
+    """Nesting settings for the print layout: spacing between pieces, which colourways get the
+    result, and per piece how it may turn ("1-way": as cut, "2-way": also turned 180 degrees,
+    "4-way": also 90 degrees) or a fixed [x, y] position."""
+    if grain is not None and grain not in GRAIN_MODES:
+        raise ValueError("grain must be 1-way, 2-way or 4-way")
+    params = _given(buffer_spacing_mm=buffer_spacing_mm, target_colorways=colorways, pattern_index=pattern_index,
+                    grain_mode=GRAIN_MODES.get(grain))
+    if fixed_position is not None:
+        params.update(fixed_x=fixed_position[0], fixed_y=fixed_position[1])
+    _send("set_nesting", params)
+    return _send("get_nesting")
+
+
+LAYOUT_SETUP = ("CLO's print layout is empty: open CLO's Printing Layout mode and run Auto Nesting "
+                "once from its toolbar (the API's nesting only works on a layout CLO has set up), then retry")
+
+
+def _markers():
+    """Measure the marker shown in CLO's Print Layout Editor. Tested in CLO 2025.2.236:
+    - The export covers only the fabric shown there; the API cannot choose it (selecting a
+      fabric only changes the Object Browser), so the fabric is identified by matching the
+      laid-out outlines' areas to each fabric's pieces.
+    - The API's nesting does nothing until the layout has been set up once in CLO (Auto Nesting
+      from the Printing Layout toolbar); an empty layout exports nothing, and the first time CLO
+      shows a dialog that waits for OK."""
+    from clo3d_mcp.plotting import marker_report, pdf_paths, polygon_area
+    path = os.path.join(_work_dir("plots"), "marker_%d.pdf" % int(time.time() * 1000))
+    _send("export_pattern_sheet", {"file_path": path, "mode": 1})
+    if not os.path.exists(path):
+        raise RuntimeError(LAYOUT_SETUP)
+    with open(path, "rb") as f:
+        pdf = f.read()
+    laid_out = sorted(polygon_area(p) for p in pdf_paths(pdf))
+    pieces = summarize(_send("get_pattern_geometry"), include_points=True)["pieces"]
+    by_fabric = {}
+    for piece in pieces:
+        points = [tuple(pt[:2]) for line in piece["lines"] for pt in line["points"][:-1]]
+        fabric = _send("get_fabric_for_pattern", {"pattern_index": piece["pattern_index"]})["fabric_index"]
+        by_fabric.setdefault(fabric, []).append(polygon_area(points))
+
+    def matches(areas):
+        left, hits = list(areas), 0
+        for area in laid_out:
+            best = min(left, key=lambda a: abs(a - area), default=None)
+            if best is not None and abs(best - area) <= max(1.0, 0.01 * area):
+                left.remove(best)
+                hits += 1
+        return hits
+
+    scores = {f: matches(areas) for f, areas in by_fabric.items()}
+    fabric = max(scores, key=scores.get) if scores else None
+    info = {f["fabric_index"]: f for f in _send("get_fabric_layout")["fabrics"]}.get(fabric, {})
+    report = dict(marker_report(pdf, info.get("width_mm")), pdf=path, fabric_index=fabric, fabric=info.get("name"))
+    report["pieces_matched_to_fabric"] = "%d of %d" % (scores.get(fabric, 0), len(laid_out))
+    report["fabric_pieces"] = len(by_fabric.get(fabric, []))
+    others = sorted(set(by_fabric) - {fabric})
+    if others:
+        report["other_fabrics"] = others
+        report["note"] = ("CLO exports one fabric's marker at a time: switch the fabric in CLO's Print "
+                          "Layout Editor and call marker_report again for fabrics %s" % others)
+    return report
+
+
+@mcp.tool()
+def nest_patterns(buffer_spacing_mm: float | None = None, fabric_index: int | None = None,
+                  fabric_width_mm: float | None = None, timeout_s: float = 60.0) -> dict:
+    """Auto-nest the pieces in CLO's print layout and report the marker shown there: length
+    along the fabric, width, pieces and utilisation (measured from the exported 1:1 layout;
+    CLO's own fabric length value did not match the layout in testing). Needs the layout set
+    up once in CLO: Printing Layout mode, Auto Nesting from its toolbar.
+
+    Args:
+        buffer_spacing_mm: Space between pieces.
+        fabric_index: With fabric_width_mm, set this fabric's width first.
+        fabric_width_mm: Usable fabric width in mm.
+        timeout_s: How long to wait for CLO's nesting to finish.
+    """
+    if fabric_width_mm is not None:
+        if fabric_index is None:
+            raise ValueError("give fabric_index with fabric_width_mm")
+        _send("set_fabric_width", {"fabric_index": fabric_index, "width_mm": fabric_width_mm})
+    if buffer_spacing_mm is not None:
+        _send("set_nesting", {"buffer_spacing_mm": buffer_spacing_mm})
+    _send("start_nesting")  # returns at once; CLO nests in the background and then reports its time
+    deadline, last = time.time() + timeout_s, None
+    time.sleep(1.0)
+    while time.time() < deadline:
+        ms = _send("get_nesting")["last_nesting_ms"]
+        if ms == last and 0 <= ms < timeout_s * 1000:
+            break
+        last = ms
+        time.sleep(0.5)
+    else:
+        _send("stop_nesting")
+        raise RuntimeError("nesting did not finish within %.0f s (stopped)" % timeout_s)
+    report = _markers()
+    report["nesting_ms"] = last
+    return report
+
+
+@mcp.tool()
+def marker_report() -> dict:
+    """Measure the marker shown in CLO's Print Layout Editor: which fabric it is, its length
+    along the fabric, width, pieces, area and utilisation, from a 1:1 PDF export (path included
+    for plotting). CLO exports one fabric at a time and the API cannot switch it; the result
+    lists the other fabrics to switch to in CLO."""
+    return _markers()
+
+
+@mcp.tool()
+def add_pattern_annotation(pattern_index: int, text: str, x: float, y: float,
+                           annotation_index: int | None = None) -> dict:
+    """Write a note on a piece (cut quantity, fabric, size, "place on fold"...) at 2D (x, y)
+    in the piece's coordinates; it prints on pattern sheets with show={"annotations": true}.
+    With annotation_index, replace that note instead."""
+    _send("add_pattern_annotation", _given(pattern_index=pattern_index, text=text, x=x, y=y,
+                                           annotation_index=annotation_index))
+    return _send("get_pattern_annotations", {"pattern_index": pattern_index})
+
+
+@mcp.tool()
+def get_pattern_annotations(pattern_index: int) -> dict:
+    """The notes written on a piece, with their positions."""
+    return _send("get_pattern_annotations", {"pattern_index": pattern_index})
+
+
 # ─── Import Tools ──────────────────────────────────────────────────────────
 
 

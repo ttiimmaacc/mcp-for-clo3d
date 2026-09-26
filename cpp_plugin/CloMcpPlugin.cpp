@@ -251,6 +251,72 @@ std::wstring Widen(const std::string& s)
 
 typedef std::function<Value(const Value&)> Handler;
 
+// Print / plot options: each "show" flag of CLO's pattern snapshot option structs by name
+#define SNAP_LINE_FLAGS(X) X(outline, ShowPatternOutline) X(internal_lines, ShowInternalLine) \
+	X(graphic_outline, ShowGraphicOutline) X(baseline, ShowBaseline) X(notches, ShowNotch) \
+	X(seam_allowance, ShowSeamAllowance) X(symmetry_line, ShowSymmetricInstanceLine) X(reference_line, ShowReferenceLine)
+#define SNAP_INFO_FLAGS(X) X(pattern_name, ShowPatternName) X(annotations, ShowPatternAnnotation) \
+	X(line_length, ShowLineLength) X(grain_line, ShowGrainLine) X(button_holes, ShowButtonHole) \
+	X(seam_taping, ShowSeamTaping) X(measurements_2d, ShowMeasurement2D) X(grading_size_name, ShowGradingSizeName) \
+	X(nest_information, ShowNestInformation)
+#define SNAP_IMAGE_FLAGS(X) X(fabric_texture, ShowFabricTexture) X(pattern_texture, ShowPatternTexture) \
+	X(graphic_texture, ShowGraphicTexture)
+
+Value SnapshotOptions(int mode)
+{
+	Marvelous::PatternSnapShotSizeOption size = UTILITY_API->GetPatternSnapShotSizeOption(mode);
+	Marvelous::PatternSnapShotLineOption line = UTILITY_API->GetPatternSnapShotLineOption(mode);
+	Marvelous::PatternSnapShotInformationOption info = UTILITY_API->GetPatternSnapShotInformationOption(mode);
+	Marvelous::PatternSnapShotImageOption image = UTILITY_API->GetPatternSnapShotImageOption(mode);
+	Value show = Value::object();
+#define GET_FLAG(key, field) show.set(#key, line.field);
+	SNAP_LINE_FLAGS(GET_FLAG)
+#undef GET_FLAG
+#define GET_FLAG(key, field) show.set(#key, info.field);
+	SNAP_INFO_FLAGS(GET_FLAG)
+#undef GET_FLAG
+#define GET_FLAG(key, field) show.set(#key, image.field);
+	SNAP_IMAGE_FLAGS(GET_FLAG)
+#undef GET_FLAG
+	return Value::object().set("mode", mode)
+		.set("paper_preset", size.m_paperPreset).set("orientation", size.m_orientation)
+		.set("width_mm", size.m_width).set("height_mm", size.m_height).set("unit", size.m_unit)
+		.set("resolution", (int)size.m_resolution).set("fabric_texture_opacity", image.FabricTextureOpacity)
+		.set("show", show);
+}
+
+void ApplySnapshotOptions(const Value& p, int mode)
+{
+	Marvelous::PatternSnapShotSizeOption size = UTILITY_API->GetPatternSnapShotSizeOption(mode);
+	if (p.has("paper_preset")) size.m_paperPreset = I(p, "paper_preset");
+	if (p.has("orientation")) size.m_orientation = I(p, "orientation");
+	if (p.has("width_mm")) size.m_width = (float)p.num("width_mm");
+	if (p.has("height_mm")) size.m_height = (float)p.num("height_mm");
+	if (p.has("unit")) size.m_unit = I(p, "unit");
+	if (p.has("resolution")) size.m_resolution = (unsigned int)I(p, "resolution");
+	UTILITY_API->SetPatternSnapShotSizeOption(size, mode);
+	if (!p.has("show") && !p.has("fabric_texture_opacity"))
+		return;
+	const Value empty = Value::object();
+	const Value& show = p.has("show") ? *p.find("show") : empty;
+	Marvelous::PatternSnapShotLineOption line = UTILITY_API->GetPatternSnapShotLineOption(mode);
+	Marvelous::PatternSnapShotInformationOption info = UTILITY_API->GetPatternSnapShotInformationOption(mode);
+	Marvelous::PatternSnapShotImageOption image = UTILITY_API->GetPatternSnapShotImageOption(mode);
+#define SET_FLAG(key, field) if (show.has(#key)) line.field = show.boolean(#key, line.field);
+	SNAP_LINE_FLAGS(SET_FLAG)
+#undef SET_FLAG
+#define SET_FLAG(key, field) if (show.has(#key)) info.field = show.boolean(#key, info.field);
+	SNAP_INFO_FLAGS(SET_FLAG)
+#undef SET_FLAG
+#define SET_FLAG(key, field) if (show.has(#key)) image.field = show.boolean(#key, image.field);
+	SNAP_IMAGE_FLAGS(SET_FLAG)
+#undef SET_FLAG
+	if (p.has("fabric_texture_opacity")) image.FabricTextureOpacity = (float)p.num("fabric_texture_opacity");
+	UTILITY_API->SetPatternSnapShotLineOption(line, mode);
+	UTILITY_API->SetPatternSnapShotInformationOption(info, mode);
+	UTILITY_API->SetPatternSnapShotImageOption(image, mode);
+}
+
 // GetFabricCount(true) returned 0 in CLO 2025.2.236 with fabrics in the scene; take the
 // larger count and, failing that, count fabrics by name.
 unsigned int FabricCount()
@@ -825,6 +891,112 @@ std::map<std::string, Handler> BuildHandlers()
 	};
 	h["list_topstitch_styles"] = [](const Value&) {
 		return Value::object().set("styles", Value::from(PATTERN_API->GetTopstitchStyleList()));
+	};
+	h["get_print_options"] = [](const Value& p) {
+		return SnapshotOptions(I(p, "mode", 1));
+	};
+	h["export_pattern_sheet"] = [](const Value& p) {
+		int mode = I(p, "mode", 1);
+		// the print layout exports only the current fabric's marker
+		if (p.has("fabric_index") && !FABRIC_API->SetCurrentFabricIndex(I(p, "fabric_index")))
+			throw std::runtime_error("CLO did not select fabric_index");
+		ApplySnapshotOptions(p, mode);
+		Value files = Value::array();
+		for (const std::string& f : EXPORT_API->ExportSnapshot2D(p.str("file_path"), mode))
+			files.a.push_back(f);
+		return Value::object().set("files", files).set("options", SnapshotOptions(mode));
+	};
+	h["export_dxf"] = [](const Value& p) {
+		Marvelous::ExportDxfOption o;
+		o.m_ExportDXFFormatType = (unsigned int)I(p, "format", 0);
+		o.m_ExportBBType = (unsigned int)I(p, "bounding_box", 1);
+		o.m_fScale = (float)p.num("scale", 1.0);
+		o.m_RotateAngle = (float)p.num("rotate", 0.0);
+		o.m_bMetric = p.boolean("metric", true);
+		o.m_bCheckedConvertCtoS = p.boolean("curves_to_straight", false);
+		o.m_bOptimizeCurvePoints = p.boolean("optimize_curve_points", false);
+		o.m_bExportWithoutGrading = p.boolean("without_grading", false);
+		o.m_bExportWithoutBaselines = p.boolean("without_baselines", false);
+		o.m_bDuplicateNotch = p.boolean("remove_duplicate_notches", false);
+		o.m_bExportSelectedPatterns = false;
+		std::string path = EXPORT_API->ExportDXF(p.str("file_path"), o);
+		return Value::object().set("file_path", path).set("exported", !path.empty());
+	};
+	h["get_fabric_layout"] = [](const Value&) {
+		Value list = Value::array();
+		for (unsigned int i = 0; i < FabricCount(); ++i)
+			list.a.push_back(Value::object().set("fabric_index", i).set("name", FABRIC_API->GetFabricName((int)i))
+				.set("width_mm", FABRIC_API->GetFabricWidth((int)i)).set("length_mm", FABRIC_API->GetFabricLength((int)i)));
+		return Value::object().set("fabrics", list);
+	};
+	h["current_fabric"] = [](const Value& p) {
+		if (p.has("fabric_index") && !FABRIC_API->SetCurrentFabricIndex(I(p, "fabric_index")))
+			throw std::runtime_error("CLO did not select fabric_index");
+		return Value::object().set("fabric_index", FABRIC_API->GetCurrentFabricIndex());
+	};
+	h["set_fabric_width"] = [](const Value& p) {
+		int fabric = I(p, "fabric_index");
+		FABRIC_API->SetFabricWidth(fabric, (float)p.num("width_mm"));
+		return Value::object().set("fabric_index", fabric).set("width_mm", FABRIC_API->GetFabricWidth(fabric));
+	};
+	h["get_nesting"] = [](const Value&) {
+		Value pieces = Value::array();
+		for (int i = 0; i < PATTERN_API->GetPatternCount(); ++i)
+		{
+			std::pair<int, int> pos = PATTERN_API->GetNestingFixedPatternPiecePos(i);
+			Value fixed = Value::array();
+			fixed.a.push_back(pos.first);
+			fixed.a.push_back(pos.second);
+			pieces.a.push_back(Value::object().set("pattern_index", i)
+				.set("grain_mode", PATTERN_API->GetNestingPatternPieceGrainDirection(i)).set("fixed_position", fixed));
+		}
+		Value colorways = Value::array();
+		for (int c : UTILITY_API->GetNestingTargetColorway())
+			colorways.a.push_back(c);
+		return Value::object().set("buffer_spacing_mm", UTILITY_API->GetNestingBufferSpacing())
+			.set("last_nesting_ms", UTILITY_API->GetNestingTime()).set("target_colorways", colorways).set("pieces", pieces);
+	};
+	h["set_nesting"] = [](const Value& p) {
+		if (p.has("buffer_spacing_mm")) UTILITY_API->SetNestingBufferSpacing((float)p.num("buffer_spacing_mm"));
+		if (p.has("target_colorways"))
+		{
+			std::vector<int> list;
+			for (const Value& v : p.find("target_colorways")->a)
+				list.push_back((int)v.n);
+			UTILITY_API->SetNestingTargetColorway(list);
+		}
+		if (p.has("pattern_index"))
+		{
+			int pattern = PatternIndex(p);
+			if (p.has("grain_mode")) PATTERN_API->SetNestingPatternPieceGrainDirection(pattern, I(p, "grain_mode"));
+			if (p.has("fixed_x") && p.has("fixed_y"))
+				PATTERN_API->SetNestingFixedPatternPiecePos(pattern, I(p, "fixed_x"), I(p, "fixed_y"));
+		}
+		return Value::object().set("set", true);
+	};
+	h["start_nesting"] = [](const Value&) {
+		UTILITY_API->StartNesting();
+		return Value::object().set("started", true).set("last_nesting_ms", UTILITY_API->GetNestingTime());
+	};
+	h["stop_nesting"] = [](const Value&) {
+		UTILITY_API->StopNesting();
+		return Value::object().set("stopped", true).set("last_nesting_ms", UTILITY_API->GetNestingTime());
+	};
+	h["get_pattern_annotations"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		Value list = Value::array();
+		for (const auto& a : PATTERN_API->GetPatternAnnotation(pattern))
+			if (!std::get<0>(a).empty())
+				list.a.push_back(Value::object().set("text", std::get<0>(a)).set("x", std::get<1>(a)).set("y", std::get<2>(a)));
+		return Value::object().set("pattern_index", pattern).set("annotations", list);
+	};
+	h["add_pattern_annotation"] = [](const Value& p) {
+		int pattern = PatternIndex(p);
+		if (p.has("annotation_index"))
+			PATTERN_API->EditPatternAnnotation(pattern, (float)p.num("x"), (float)p.num("y"), I(p, "annotation_index"), p.str("text"));
+		else
+			PATTERN_API->AddPatternAnnotation(pattern, (float)p.num("x"), (float)p.num("y"), p.str("text"));
+		return Value::object().set("pattern_index", pattern).set("set", true);
 	};
 	h["import_topstitch_style"] = [](const Value& p) {
 		std::string path = p.str("file_path");
