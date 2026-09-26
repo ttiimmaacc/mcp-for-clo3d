@@ -1276,6 +1276,34 @@ def sew_lines(
 
 
 @mcp.tool()
+def sew_edges(pattern_a: int, from_a: list[float], to_a: list[float],
+              pattern_b: int, from_b: list[float], to_b: list[float]) -> dict:
+    """Sew two outline edges by saying which points meet: from_a meets from_b and to_a meets
+    to_b. The lines are found by their endpoints (2D pattern coordinates, mm, within 2 mm) and
+    the stitch directions follow, so the seam cannot come out twisted (with sew_lines the
+    direction flags are easy to get backwards).
+
+    Args:
+        pattern_a: Piece of side A.
+        from_a: One end of the edge on A, e.g. the neck point [x, y].
+        to_a: The other end on A, e.g. the shoulder point.
+        pattern_b: Piece of side B.
+        from_b: The point on B that meets from_a.
+        to_b: The point on B that meets to_a.
+    """
+    from clo3d_mcp.geometry import find_edge
+    pieces = {p["pattern_index"]: p for p in summarize(_send("get_pattern_geometry"))["pieces"]}
+    for index in (pattern_a, pattern_b):
+        if index not in pieces:
+            raise ValueError("no pattern %d" % index)
+    line_a, forward_a = find_edge(pieces[pattern_a], from_a, to_a)
+    line_b, forward_b = find_edge(pieces[pattern_b], from_b, to_b)
+    result = _send("sew_lines", {"pattern_a": pattern_a, "line_a": line_a, "pattern_b": pattern_b,
+                                 "line_b": line_b, "direction_a": forward_a, "direction_b": forward_b})
+    return dict(result, line_a=line_a, line_b=line_b)
+
+
+@mcp.tool()
 def list_topstitch_styles() -> dict:
     """List the topstitch styles in the project, for add_topstitch's style_index."""
     return _send("list_topstitch_styles")

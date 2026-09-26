@@ -118,3 +118,13 @@ def test_hem_strip_refuses_curves_and_bad_widths():
         hem_strip(piece, 0, 70)
     with pytest.raises(ValueError, match="positive"):
         hem_strip(_rect_piece([(0, 0), (400, 0), (400, 600), (0, 600)]), 0, 0)
+
+
+def test_find_edge_by_endpoints_either_way():
+    import pytest
+    from clo3d_mcp.geometry import find_edge
+    piece = _rect_piece([(0, 0), (400, 0), (400, 600), (0, 600)])
+    assert find_edge(piece, (400, 0), (400, 600)) == (1, True)
+    assert find_edge(piece, (400.5, 600), (400, -1)) == (1, False)
+    with pytest.raises(ValueError, match="no line"):
+        find_edge(piece, (0, 0), (400, 600))

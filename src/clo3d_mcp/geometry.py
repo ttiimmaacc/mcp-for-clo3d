@@ -172,3 +172,17 @@ def summarize(result, pattern_index=None, include_points=False):
         pieces = [p for p in pieces if p["pattern_index"] == pattern_index]
         seams = [s for s in seams if any(side.get("pattern_index") == pattern_index for side in s["sides"])]
     return {"pieces": pieces, "seams": seams}
+
+
+def find_edge(piece, start, end, tolerance=2.0):
+    """The outline line of a summarized piece that runs between two points (mm), in either
+    direction: (line_index, forward), forward meaning the line starts at `start`."""
+    def near(p, q):
+        return abs(p[0] - q[0]) <= tolerance and abs(p[1] - q[1]) <= tolerance
+    for line in piece["lines"]:
+        if near(line["start"], start) and near(line["end"], end):
+            return line["line_index"], True
+        if near(line["start"], end) and near(line["end"], start):
+            return line["line_index"], False
+    ends = ", ".join("%d: %s-%s" % (l["line_index"], l["start"], l["end"]) for l in piece["lines"])
+    raise ValueError("no line of %s runs from %s to %s (lines: %s)" % (piece.get("name"), start, end, ends))
