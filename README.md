@@ -95,14 +95,39 @@ Connect only one client to CLO at a time, because they share the same request fi
 
 ### 5. Try it
 
-With CLO open, ask your assistant things like:
+With CLO open, describe the job the way you would to a colleague. The assistant works through
+the steps in CLO, looks at the result (it can capture the 3D window and draw the 2D pieces), and
+reports back. Some examples:
 
-- *"What's in this CLO project?"*
-- *"Create a 400 × 600 mm rectangle pattern and show me the 2D pieces."*
-- *"Run 100 simulation steps and show me the garment from the front and the side."*
-- *"Export a GLB to my desktop."*
+**Check a garment**
+- *"Simulate this, then show me the front, back and side with the strain map on. Where is it
+  pulling?"*
+- *"Check the sewing: are any seams twisted, with one side sewn in the opposite direction?"*
 
-CLO's API has no undo, so for bigger changes ask the assistant to *save a checkpoint* first.
+**Get a style ready for production**
+- *"Write 'CUT 1' and the piece name on every piece, nest them on 1400 mm wide fabric with 10 mm
+  spacing, and tell me how long the marker is and how well the fabric is used."*
+  (CLO lays out one fabric at a time: switch fabrics in its Print Layout Editor to measure the next.)
+- *"Export that marker as a 1:1 PDF for the plotter and the whole pattern as an AAMA DXF for our
+  CAD system."*
+
+**Build something from a spec**
+- *"Make a two-panel noren curtain, 1050 × 2020 mm finished, with 30 mm side hems, a 70 mm bottom
+  hem and a star appliqué on front and back, hanging from a 32 mm rod."*
+  ([`examples/noren_curtain.py`](examples/noren_curtain.py) is this build as a script.)
+- *"Topstitch every appliqué patch 4 mm in from its edge with 0.4 mm thread."*
+
+**Fabrics and presentation**
+- *"What fabrics does this project use, and what are their weights and thicknesses? Label them
+  all 60% cotton / 40% linen."*
+- *"Export a GLB for the web shop and turntable images of the finished garment."*
+
+Good to know:
+- CLO's API has no undo, so ask the assistant to **save a checkpoint** before bigger changes.
+- For nesting, switch CLO to **Printing Layout** mode once per session (mode dropdown at the top
+  right); the assistant will tell you when it needs this.
+- Some things CLO's API can't do at all, like folding cloth or placing pins; see
+  [Tools](#tools) for what's covered and what isn't.
 
 ### Or build the plug-in yourself
 
