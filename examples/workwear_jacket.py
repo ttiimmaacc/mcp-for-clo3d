@@ -107,6 +107,18 @@ if __name__ == "__main__":
         s.sew_edges(back, m(underarm), m(slit), front, underarm, slit)
     step("body: back and fronts, shoulder and side seams, %d mm slits" % SLIT)
 
+    # --- front closure: CLO's API cannot place buttons, so the overlap is sewn along centre
+    #     front, as if buttoned; without it the unbuttoned fronts spread and the collar flops ---
+    cf = [[0, 40], [0, neck_front_y - 15]]
+    closure = []
+    for front in (front_r, front_l):
+        closure.append(len(summarize(s._send("get_pattern_geometry"), front)["pieces"][0]["internal_shapes"]))
+        s.add_internal_shape(front, cf, closed=False)
+    s.sew_lines(front_r, 0, front_l, 0, direction_a=True, direction_b=True,
+                internal_shape_a=closure[0], internal_shape_b=closure[1])
+    # no layer: a layered piece shows tinted green in CLO, and the closure seam holds the overlap
+    step("front closed along centre front (buttons stand-in)")
+
     # --- sleeves: flat dropped-shoulder sleeve; the top's midpoint is the shoulder point ---
     arm = math.hypot(sx - HALF_CHEST, sy - UNDERARM_Y)      # armhole seam length on each body piece
     bs = SLEEVE - CUFF_H
