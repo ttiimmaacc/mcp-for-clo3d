@@ -1033,8 +1033,10 @@ def set_nesting(buffer_spacing_mm: float | None = None, colorways: list[int] | N
     return _send("get_nesting")
 
 
-LAYOUT_SETUP = ("CLO's print layout is empty: open CLO's Printing Layout mode and run Auto Nesting "
-                "once from its toolbar (the API's nesting only works on a layout CLO has set up), then retry")
+LAYOUT_SETUP = ("CLO's print layout is empty: switch CLO to Printing Layout mode, then call "
+                "clo_ui_nest_all_fabrics (or nest_patterns with allow_ui_click=True), or click Nest All "
+                "Fabrics in CLO's Print Layout Editor yourself; the API's nesting only works on a layout "
+                "CLO has set up")
 
 
 def _markers():
@@ -1085,17 +1087,23 @@ def _markers():
 
 @mcp.tool()
 def nest_patterns(buffer_spacing_mm: float | None = None, fabric_index: int | None = None,
-                  fabric_width_mm: float | None = None, timeout_s: float = 60.0) -> dict:
+                  fabric_width_mm: float | None = None, timeout_s: float = 60.0,
+                  allow_ui_click: bool = False) -> dict:
     """Auto-nest the pieces in CLO's print layout and report the marker shown there: length
     along the fabric, width, pieces and utilisation (measured from the exported 1:1 layout;
-    CLO's own fabric length value did not match the layout in testing). Needs the layout set
-    up once in CLO: Printing Layout mode, Auto Nesting from its toolbar.
+    CLO's own fabric length value did not match the layout in testing).
+
+    In testing the API's nesting sometimes did nothing until CLO's own nesting had run once in
+    that CLO session (seen with a fresh session and fabrics added through the API; not in every
+    fresh session). With allow_ui_click, an empty layout is then set up by clicking "Nest All
+    Fabrics" in CLO (needs CLO in Printing Layout mode); otherwise the error says what to do.
 
     Args:
         buffer_spacing_mm: Space between pieces.
         fabric_index: With fabric_width_mm, set this fabric's width first.
         fabric_width_mm: Usable fabric width in mm.
         timeout_s: How long to wait for CLO's nesting to finish.
+        allow_ui_click: Click CLO's "Nest All Fabrics" button when the layout is empty.
     """
     if fabric_width_mm is not None:
         if fabric_index is None:
@@ -1115,9 +1123,30 @@ def nest_patterns(buffer_spacing_mm: float | None = None, fabric_index: int | No
     else:
         _send("stop_nesting")
         raise RuntimeError("nesting did not finish within %.0f s (stopped)" % timeout_s)
-    report = _markers()
+    try:
+        report = _markers()
+    except RuntimeError as error:
+        if str(error) != LAYOUT_SETUP or not allow_ui_click:
+            raise
+        from clo3d_mcp.clo_ui import nest_all_fabrics
+        nest_all_fabrics()  # CLO's own nesting sets the layout up, with the same spacing
+        time.sleep(2.0)
+        report = _markers()
+        report["set_up_by_ui_click"] = True
     report["nesting_ms"] = last
     return report
+
+
+@mcp.tool()
+def clo_ui_nest_all_fabrics() -> dict:
+    """Click "Nest All Fabrics" in CLO's Print Layout Editor (through Windows UI Automation),
+    for when the print layout is empty: the API's nesting only works once CLO's own nesting has
+    run. CLO must be in Printing Layout mode (the user switches it; CLO's mode menu cannot be
+    driven this way). Returns the marker it produced."""
+    from clo3d_mcp.clo_ui import nest_all_fabrics
+    nest_all_fabrics()
+    time.sleep(2.0)
+    return _markers()
 
 
 @mcp.tool()
