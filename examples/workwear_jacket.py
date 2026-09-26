@@ -2,8 +2,9 @@
 
 Reference: boxy, cropped jacket in double-faced wool (plaid / solid charcoal), very dropped
 shoulders, stand collar, five-button front, turn-back cuffs, side slits.
-Size M: shoulders 80 cm (seam to seam), chest 54 cm (laid flat), back length 64 cm,
-sleeve 76 cm (centre back neck to cuff, so about 36 cm from the dropped shoulder seam).
+Size M, the brand's measuring guide (laid flat): shoulders 80 cm seam to seam, chest 54 cm
+straight across at the narrowest point, back 64 cm from below the collar to the hem, sleeves
+76 cm from the collar seam to the wrist (so the shoulder line counts towards the sleeve).
 
 2D pattern coordinates are millimetres with y up; the hem is y = 0. Pieces are drafted as seen
 from the outside of the garment, so on the fronts the avatar's right is on the left of the
@@ -30,7 +31,7 @@ WOOL = r"C:\Users\Public\Documents\CLO\CLO Assets\Fabric\V2_Woven_Melton_Boiled_
 HALF_SHOULDER = 400.0        # centre to the dropped shoulder seam
 HALF_CHEST = 270.0           # chest 54 cm laid flat: each front and half the back
 LENGTH = 640.0               # back length, centre back neck to hem
-SLEEVE = 360.0               # dropped shoulder seam to cuff edge
+SLEEVE_FROM_COLLAR = 760.0   # collar seam (neck point) along the shoulder to the wrist
 CUFF_H = 70.0
 COLLAR_H = 65.0
 NECK_HALF = 95.0             # half the neck opening across
@@ -40,6 +41,8 @@ UNDERARM_Y = 380.0           # side seam top
 SHOULDER_Y = LENGTH - 25.0   # height of the dropped shoulder point
 NECK_Y = LENGTH + 20.0       # height of the neck point (shoulder rises to it)
 SLIT = 100.0                 # side slits above the hem
+SHOULDER_LINE = math.hypot(HALF_SHOULDER - NECK_HALF, NECK_Y - SHOULDER_Y)
+SLEEVE = SLEEVE_FROM_COLLAR - SHOULDER_LINE   # dropped shoulder seam to the cuff edge
 CUFF_HALF = 165.0            # half the cuff width (33 cm round)
 
 log = []
