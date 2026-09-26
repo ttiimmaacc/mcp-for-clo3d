@@ -1368,41 +1368,56 @@ def list_topstitch_styles() -> dict:
     return _send("list_topstitch_styles")
 
 
-# A topstitch style saved from CLO once, kept outside the temp folder and the repo (it holds
-# CLO's stitch textures); create_topstitch_style patches copies of it.
-STITCH_TEMPLATE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "clo3d_mcp",
-                               "topstitch_template.sst")
+# Topstitch styles saved from CLO once, kept outside the temp folder and the repo (they hold
+# CLO's stitch textures); create_topstitch_style patches copies of them. The stitch's shape
+# (single, overlock, zigzag...) comes from the template, the numbers from the call.
+STITCH_TEMPLATES = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "clo3d_mcp")
+
+
+def _stitch_template(name: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise ValueError("template names use letters, digits, _ and - only")
+    # the first template was saved without a name; it is the "default" one
+    return os.path.join(STITCH_TEMPLATES, "topstitch_template.sst" if name == "default"
+                        else "topstitch_template_%s.sst" % name)
 
 
 @mcp.tool()
 def create_topstitch_style(name: str, stitch_length_mm: float | None = None,
                            thread_thickness_mm: float | None = None, offset_mm: float | None = None,
-                           template_path: str | None = None) -> dict:
+                           template: str = "default", template_path: str | None = None) -> dict:
     """Create a topstitch style with a given stitch length, thread thickness and offset from
     the stitched line (CLO's API cannot set these on a style, so a saved style file is copied
     with the values changed and imported). Returns its style_index for add_topstitch.
 
-    Needs a template once: in CLO select any topstitch in the Object Browser, click the save
-    icon in the Property Editor's Topstitch row and pass that .sst as template_path; it is
-    kept for later calls.
+    The stitch's shape and colour come from a template: a style saved from CLO once (select a
+    topstitch in the Object Browser, set its Shape, e.g. Overlock, and colour in the Property
+    Editor, click the save icon in its Topstitch row) and passed as template_path with a
+    template name; later calls just name the template.
 
     Args:
         name: Name for the new style.
         stitch_length_mm: Length of each stitch in mm (default: the template's).
         thread_thickness_mm: Thread thickness in mm (CLO shows it as Tex: 0.2 mm = 40 Tex).
         offset_mm: Distance of the stitching from the line or seam it follows, in mm.
-        template_path: A .sst saved from CLO (only needed the first time).
+        template: Which saved template to use, e.g. "default" or "overlock".
+        template_path: A .sst saved from CLO, stored as this template (first time only).
     """
     import shutil
     from clo3d_mcp.stitch_style import make_style, read_values
+    stored = _stitch_template(template)
     if template_path:
-        os.makedirs(os.path.dirname(STITCH_TEMPLATE), exist_ok=True)
-        if os.path.abspath(template_path) != os.path.abspath(STITCH_TEMPLATE):
-            shutil.copyfile(template_path, STITCH_TEMPLATE)
-    if not os.path.exists(STITCH_TEMPLATE):
-        raise ValueError("no topstitch template yet: save any topstitch style from CLO's Property Editor "
-                         "(save icon in the Topstitch row) and pass the .sst as template_path")
-    with open(STITCH_TEMPLATE, "rb") as f:
+        os.makedirs(STITCH_TEMPLATES, exist_ok=True)
+        if os.path.abspath(template_path) != os.path.abspath(stored):
+            shutil.copyfile(template_path, stored)
+    if not os.path.exists(stored):
+        have = sorted(f[len("topstitch_template"):-4].lstrip("_") or "default"
+                      for f in os.listdir(STITCH_TEMPLATES) if f.startswith("topstitch_template")) \
+            if os.path.isdir(STITCH_TEMPLATES) else []
+        raise ValueError("no topstitch template '%s' (have: %s): save a topstitch style from CLO's Property "
+                         "Editor (save icon in the Topstitch row) and pass the .sst as template_path"
+                         % (template, ", ".join(have) or "none"))
+    with open(stored, "rb") as f:
         style = make_style(f.read(), stitch_length_mm, thread_thickness_mm, offset_mm)
     path = os.path.join(_work_dir("stitches"), "style_%d.sst" % int(time.time() * 1000))
     with open(path, "wb") as f:
@@ -1412,7 +1427,7 @@ def create_topstitch_style(name: str, stitch_length_mm: float | None = None,
         raise RuntimeError("CLO did not add the style: %s" % result)
     _send("set_topstitch_style", {"style_index": result["style_index"], "name": name})
     length, thickness, offset = read_values(style)
-    return {"style_index": result["style_index"], "name": name, "stitch_length_mm": length,
+    return {"style_index": result["style_index"], "name": name, "template": template, "stitch_length_mm": length,
             "thread_thickness_mm": thickness, "thread_tex": round(thickness * 200), "offset_mm": offset}
 
 

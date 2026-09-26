@@ -30,7 +30,6 @@ WOOL = r"C:\Users\Public\Documents\CLO\CLO Assets\Fabric\V2_Woven_Melton_Boiled_
 # Grey/black workwear check, one 120 mm repeat, and the plain charcoal back face
 PLAID = [["#1b1b1d", 45], ["#5d5d60", 6], ["#1b1b1d", 6], ["#5d5d60", 35], ["#8e8e90", 3], ["#5d5d60", 25]]
 CHARCOAL = [92, 92, 96]
-THREAD = (150, 150, 155)     # light grey contrast thread
 
 # Measurements (mm)
 HALF_SHOULDER = 400.0        # centre to the dropped shoulder seam
@@ -155,8 +154,11 @@ if __name__ == "__main__":
     step("placed on the avatar")
 
     # --- contrast edge stitching on every seam and raw edge, as on the reversible original ---
-    style = s.create_topstitch_style("Contrast edge", thread_thickness_mm=0.3, offset_mm=3.0)
-    s.set_topstitch_style(style["style_index"], color=list(THREAD))
+    # overlock shape and grey thread come from a style saved from CLO (Shape: Overlock); pass it
+    # once as template_path, later runs reuse the stored "overlock" template
+    saved = os.path.join(os.path.dirname(__file__), "..", "overlock.sst")
+    style = s.create_topstitch_style("Overlock edge", thread_thickness_mm=0.5, offset_mm=2.0, template="overlock",
+                                     template_path=saved if os.path.exists(saved) else None)
     done = s.topstitch_all(style["style_index"])
     step("contrast stitching: %d seams, %d edges%s" % (done["seams"], done["edges"],
                                                          ", failed %s" % done["failed"] if done["failed"] else ""))
