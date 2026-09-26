@@ -41,13 +41,23 @@ COLLAR_H = 65.0
 NECK_HALF = 95.0             # half the neck opening across
 FRONT_NECK_DROP = 85.0
 EXTENSION = 25.0             # button extension past centre front
-UNDERARM_Y = 380.0           # side seam top
 SHOULDER_Y = LENGTH - 25.0   # height of the dropped shoulder point
+# deep, boxy armhole: straight down from the dropped shoulder, then curving in to the side seam
+# (in the brand's diagram the chest line sits about halfway down the body)
+ARMHOLE_DEPTH = 240.0       # verified: with the low-cap two-piece sleeve this drapes cleanly once the
+                            # sleeves are nudged onto the arms with CLO's Move tool (see the note at the end)
+UNDERARM_Y = SHOULDER_Y - ARMHOLE_DEPTH           # side seam top
+ARM_CURVE = (HALF_SHOULDER - 15.0, UNDERARM_Y + 110.0)   # curve point: near vertical above it
 NECK_Y = LENGTH + 20.0       # height of the neck point (shoulder rises to it)
 SLIT = 100.0                 # side slits above the hem
+# kangaroo pocket half, in front coordinates (x outwards from centre front, y up from the hem)
+POCKET_BOTTOM, POCKET_TOP, POCKET_SLANT_Y = 60.0, 300.0, 170.0
+POCKET_CF = 18.0             # the halves stop just short of the front edges
+POCKET_OUT, POCKET_TOP_OUT = 230.0, 120.0
 SHOULDER_LINE = math.hypot(HALF_SHOULDER - NECK_HALF, NECK_Y - SHOULDER_Y)
 SLEEVE = SLEEVE_FROM_COLLAR - SHOULDER_LINE   # dropped shoulder seam to the cuff edge
 CUFF_HALF = 165.0            # half the cuff width (33 cm round)
+CAP_HEIGHT = 60.0            # low sleeve cap for a dropped shoulder
 
 log = []
 
@@ -88,15 +98,16 @@ if __name__ == "__main__":
 
     # --- body: back and two fronts, dropped shoulders, side slits ---
     sx, sy = HALF_SHOULDER, SHOULDER_Y
+    cx, cy = ARM_CURVE
     back, back_lines = piece([[-HALF_CHEST, 0], [HALF_CHEST, 0], [HALF_CHEST, SLIT], [HALF_CHEST, UNDERARM_Y],
-                              [sx, sy], [NECK_HALF, NECK_Y], [0, LENGTH, 2], [-NECK_HALF, NECK_Y],
-                              [-sx, sy], [-HALF_CHEST, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Back")
+                              [cx, cy, 2], [sx, sy], [NECK_HALF, NECK_Y], [0, LENGTH, 2], [-NECK_HALF, NECK_Y],
+                              [-sx, sy], [-cx, cy, 2], [-HALF_CHEST, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Back")
     neck_front_y = NECK_Y - FRONT_NECK_DROP - 20
     front_r, fr_lines = piece([[-HALF_CHEST, 0], [EXTENSION, 0], [EXTENSION, neck_front_y],
                                [-NECK_HALF * 0.55, neck_front_y + 18, 2], [-NECK_HALF, NECK_Y],
-                               [-sx, sy], [-HALF_CHEST, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Front right")
+                               [-sx, sy], [-cx, cy, 2], [-HALF_CHEST, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Front right")
     front_l, fl_lines = piece([[-EXTENSION, 0], [HALF_CHEST, 0], [HALF_CHEST, SLIT], [HALF_CHEST, UNDERARM_Y],
-                               [sx, sy], [NECK_HALF, NECK_Y], [NECK_HALF * 0.55, neck_front_y + 18, 2],
+                               [cx, cy, 2], [sx, sy], [NECK_HALF, NECK_Y], [NECK_HALF * 0.55, neck_front_y + 18, 2],
                                [-EXTENSION, neck_front_y]], "Front left")
     # shoulders (neck point to shoulder point) and sides (underarm to slit top), right then left
     for front, sign in ((front_r, -1), (front_l, 1)):
@@ -120,22 +131,44 @@ if __name__ == "__main__":
     step("front closed along centre front (buttons stand-in)")
 
     # --- sleeves: flat dropped-shoulder sleeve; the top's midpoint is the shoulder point ---
-    arm = math.hypot(sx - HALF_CHEST, sy - UNDERARM_Y)      # armhole seam length on each body piece
+    # armhole seam length on each body piece (curved), read back from CLO
+    pz = summarize(s._send("get_pattern_geometry"), back)["pieces"][0]
+    li, _ = find_edge(pz, [sx, sy], [HALF_CHEST, UNDERARM_Y])
+    arm = next(l["length"] for l in pz["lines"] if l["line_index"] == li)
     bs = SLEEVE - CUFF_H
+    # dropped shoulder: a low, flat cap (the body already covers the shoulder); a tall set-in
+    # style cap collapsed into wrinkles. The sleeve's width follows from the armhole length.
+    cap = CAP_HEIGHT
+    half = math.sqrt(arm ** 2 - cap ** 2)
+    low = bs - cap
     sleeves = {}
+    # two-piece sleeve: a front and a back panel, seamed over the top of the arm (from the
+    # shoulder point to the cuff) and underneath. CLO places a flat front or back panel reliably;
+    # a one-piece sleeve wrapped round the arm landed rotated, seams across the front and back.
+    # Halves of the capped sleeve outline, split along x = 0:
+    plus = [[0, 0], [CUFF_HALF, 0], [half, low], [0, bs]]           # over-arm edge on its left
+    minus = [[-CUFF_HALF, 0], [0, 0], [0, bs], [-half, low]]        # over-arm edge on its right
     for side, sign in (("right", -1), ("left", 1)):
-        sl, _ = piece([[-CUFF_HALF, 0], [CUFF_HALF, 0], [arm, bs], [0, bs], [-arm, bs]], "Sleeve %s" % side)
-        s.sew_edges(sl, [arm, bs], [CUFF_HALF, 0], sl, [-arm, bs], [-CUFF_HALF, 0])      # underarm seam
-        # seen from outside the arm, the front of the body is on +x for the right arm, -x for the left
-        front = front_r if side == "right" else front_l
+        front, sfx = (front_r, "R") if side == "right" else (front_l, "L")
+        # drawn as seen from the side each panel faces, the over-arm edge towards the arm's outer
+        # side: right arm front (+x half), right arm back (-x half), and the reverse on the left
+        fx = 1 if side == "right" else -1
+        fp, _ = piece(plus if fx > 0 else minus, "Sleeve %s front" % side)
+        bp, _ = piece(minus if fx > 0 else plus, "Sleeve %s back" % side)
+        s.sew_edges(fp, [0, bs], [0, 0], bp, [0, bs], [0, 0])                                       # over-arm
+        s.sew_edges(fp, [fx * half, low], [fx * CUFF_HALF, 0], bp, [-fx * half, low], [-fx * CUFF_HALF, 0])  # underarm
         shoulder, underarm = [sign * sx, sy], [sign * HALF_CHEST, UNDERARM_Y]
-        s.sew_edges(sl, [0, bs], [-sign * arm, bs], front, shoulder, underarm)
-        s.sew_edges(sl, [0, bs], [sign * arm, bs], back, [-shoulder[0], shoulder[1]], [-underarm[0], underarm[1]])
-        cf, _ = piece([[-CUFF_HALF, -CUFF_H], [CUFF_HALF, -CUFF_H], [CUFF_HALF, 0], [-CUFF_HALF, 0]], "Cuff %s" % side)
-        s.sew_edges(cf, [-CUFF_HALF, 0], [CUFF_HALF, 0], sl, [-CUFF_HALF, 0], [CUFF_HALF, 0])
+        s.sew_edges(fp, [0, bs], [fx * half, low], front, shoulder, underarm)
+        s.sew_edges(bp, [0, bs], [-fx * half, low], back, [-shoulder[0], shoulder[1]], [-underarm[0], underarm[1]])
+        # cuff: top edge split at its middle, one half to each panel, closed into a tube
+        cf, _ = piece([[-CUFF_HALF, -CUFF_H], [CUFF_HALF, -CUFF_H], [CUFF_HALF, 0], [0, 0], [-CUFF_HALF, 0]],
+                      "Cuff %s" % side)
+        s.sew_edges(cf, [0, 0], [fx * CUFF_HALF, 0], fp, [0, 0], [fx * CUFF_HALF, 0])
+        s.sew_edges(cf, [0, 0], [-fx * CUFF_HALF, 0], bp, [0, 0], [-fx * CUFF_HALF, 0])
         s.sew_edges(cf, [CUFF_HALF, -CUFF_H], [CUFF_HALF, 0], cf, [-CUFF_HALF, -CUFF_H], [-CUFF_HALF, 0])
-        sleeves[side] = (sl, cf)
-    step("sleeves: %.0f mm armhole seams, %d mm to the cuff, %d mm cuffs" % (arm, SLEEVE, CUFF_H))
+        sleeves[side] = (fp, bp, cf, sfx)
+    step("two-piece sleeves: %.0f mm armhole seams, %.0f mm cap, %.0f mm round at the top, %d mm to the cuff"
+         % (arm, cap, half * 2, SLEEVE))
 
     # --- stand collar: bottom edge split to match right front, back and left front necklines ---
     neck_len = {}
@@ -158,12 +191,28 @@ if __name__ == "__main__":
     # --- dress the avatar ---
     # arrangement points are centred on each piece; the _3 points (55 % up the torso) put a
     # 64 cm body piece's neckline at the base of the neck, the _2 points put it at the face
-    for p, name in ((back, "Body_Back_Center_3"), (front_r, "Body_Front_3_R"), (front_l, "Body_Front_3_L"),
-                    (sleeves["right"][0], "Arm_Outside_1_R"), (sleeves["left"][0], "Arm_Outside_1_L"),
-                    (sleeves["right"][1], "Wrist_Outside_R"), (sleeves["left"][1], "Wrist_Outside_L"),
-                    (collar, "Neck_Collar")):
-        s.place_pattern(p, arrangement_index=arrangement(name))
+    for p, name, *start in ((back, "Body_Back_Center_3"), (front_r, "Body_Front_3_R"), (front_l, "Body_Front_3_L"),
+                            (sleeves["right"][0], "Arm_Front_1_R"), (sleeves["right"][1], "Arm_Back_1_R"),
+                            (sleeves["left"][0], "Arm_Front_1_L"), (sleeves["left"][1], "Arm_Back_1_L"),
+                            (sleeves["right"][2], "Wrist_Outside_R"), (sleeves["left"][2], "Wrist_Outside_L"),
+                            (collar, "Neck_Collar")):
+        if start:   # position on the point's surface (%) and distance from the body
+            s.place_pattern(p, arrangement_index=arrangement(name), position_x=start[0][0],
+                            position_y=start[0][1], offset=start[0][2])
+        else:
+            s.place_pattern(p, arrangement_index=arrangement(name))
     step("placed on the avatar")
+
+    # --- split kangaroo pocket: one half on each front, meeting at centre front; sewn at the
+    #     top, outer side, bottom and centre front, the slanted side left open as the opening ---
+    for front, sign, point in ((front_r, -1, "Body_Front_4_R"), (front_l, 1, "Body_Front_4_L"))             if "--no-pocket" not in sys.argv else ():
+        x = lambda v: sign * v
+        half = [[x(POCKET_OUT), POCKET_SLANT_Y], [x(POCKET_OUT), POCKET_BOTTOM], [x(-POCKET_CF), POCKET_BOTTOM],
+                [x(-POCKET_CF), POCKET_TOP], [x(POCKET_TOP_OUT), POCKET_TOP]]
+        made = s.add_applique(front, half, sewn_lines=4, layer=1, fabric_index=fabric,
+                              name="Pocket %s" % ("right" if sign < 0 else "left"), place_flat=False)
+        s.place_pattern(made["patches"][0]["pattern_index"], arrangement_index=arrangement(point))
+    step("kangaroo pocket: two halves, slanted openings")
 
     # --- contrast edge stitching on every seam and raw edge, as on the reversible original ---
     # overlock shape and grey thread come from a style saved from CLO (Shape: Overlock); pass it
@@ -179,3 +228,6 @@ if __name__ == "__main__":
     for _ in range(6):
         s.simulate(50)
     step("simulated; done in %.0f s" % (time.time() - t0))
+    # Known limit: CLO's API only places pieces on arrangement points (no free 3D move), and the
+    # sleeves can start partly off the arms, leaving the arm through the armhole seam at the back
+    # of the upper arm. A nudge with CLO's Move tool before simulating fixes it.
