@@ -1457,6 +1457,40 @@ def add_topstitch(
 
 
 @mcp.tool()
+def topstitch_all(style_index: int, seams: bool = True, free_edges: bool = True,
+                  pattern_indices: list[int] | None = None) -> dict:
+    """Topstitch a whole garment in one go: every seam and/or every free outline edge (edges no
+    seam uses: hems, front edges, cuffs, collar tops), e.g. the contrast edge stitching of a
+    reversible or unlined jacket.
+
+    Args:
+        style_index: Topstitch style (list_topstitch_styles, create_topstitch_style).
+        seams: Stitch along every seam.
+        free_edges: Stitch every free outline edge.
+        pattern_indices: Only these pieces (default: all).
+    """
+    from clo3d_mcp.geometry import free_edges as find_free
+    summary = summarize(_send("get_pattern_geometry"))
+    done = {"seams": 0, "edges": 0, "failed": []}
+    if seams:
+        for seam in summary["seams"]:
+            owners = {side.get("pattern_index") for side in seam["sides"]}
+            if pattern_indices is not None and not owners & set(pattern_indices):
+                continue
+            if _send("add_topstitch", {"style_index": style_index, "seam_index": seam["seam_index"]}).get("added"):
+                done["seams"] += 1
+            else:
+                done["failed"].append({"seam_index": seam["seam_index"]})
+    if free_edges:
+        for pattern, line in find_free(summary, pattern_indices):
+            if _send("add_topstitch", {"style_index": style_index, "pattern_index": pattern, "line_index": line}).get("added"):
+                done["edges"] += 1
+            else:
+                done["failed"].append({"pattern_index": pattern, "line_index": line})
+    return done
+
+
+@mcp.tool()
 def set_seam_taping(pattern_index: int, line_index: int, enabled: bool = True) -> dict:
     """Turn seam taping on or off for one outline line of a pattern."""
     return _send("set_seam_taping", {"pattern_index": pattern_index, "line_index": line_index, "enabled": enabled})

@@ -128,3 +128,15 @@ def test_find_edge_by_endpoints_either_way():
     assert find_edge(piece, (400.5, 600), (400, -1)) == (1, False)
     with pytest.raises(ValueError, match="no line"):
         find_edge(piece, (0, 0), (400, 600))
+
+
+def test_free_edges_leave_out_sewn_lines():
+    from clo3d_mcp.geometry import free_edges
+    summary = {"pieces": [{"pattern_index": 0, "lines": [{"line_index": i} for i in range(4)]},
+                          {"pattern_index": 1, "lines": [{"line_index": i} for i in range(3)]}],
+               "seams": [{"sides": [{"pattern_index": 0, "lines": [{"line_index": 1}]},
+                                    {"pattern_index": 1, "lines": [{"line_index": 2}]}]},
+                         {"sides": [{"pattern_index": 1, "internal_shape": 0, "lines": [{"line_index": 0}]},
+                                    {"pattern_index": 0, "lines": [{"line_index": 3}]}]}]}
+    assert free_edges(summary) == [(0, 0), (0, 2), (1, 0), (1, 1)]
+    assert free_edges(summary, [1]) == [(1, 0), (1, 1)]

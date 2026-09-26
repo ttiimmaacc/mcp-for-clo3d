@@ -30,6 +30,7 @@ WOOL = r"C:\Users\Public\Documents\CLO\CLO Assets\Fabric\V2_Woven_Melton_Boiled_
 # Grey/black workwear check, one 120 mm repeat, and the plain charcoal back face
 PLAID = [["#1b1b1d", 45], ["#5d5d60", 6], ["#1b1b1d", 6], ["#5d5d60", 35], ["#8e8e90", 3], ["#5d5d60", 25]]
 CHARCOAL = [92, 92, 96]
+THREAD = (150, 150, 155)     # light grey contrast thread
 
 # Measurements (mm)
 HALF_SHOULDER = 400.0        # centre to the dropped shoulder seam
@@ -135,10 +136,13 @@ if __name__ == "__main__":
     a, b = neck_len[front_r], neck_len[back]
     total = a + b + a
     collar, _ = piece([[0, 0], [a, 0], [a + b, 0], [total, 0], [total, COLLAR_H], [0, COLLAR_H]], "Stand collar")
-    s.sew_edges(collar, [0, 0], [a, 0], front_r, [EXTENSION, neck_front_y], [-NECK_HALF, NECK_Y])
-    s.sew_edges(collar, [a, 0], [a + b, 0], back, [NECK_HALF, NECK_Y], [-NECK_HALF, NECK_Y])
-    s.sew_edges(collar, [a + b, 0], [total, 0], front_l, [NECK_HALF, NECK_Y], [-EXTENSION, neck_front_y])
-    step("stand collar %.0f x %d mm" % (total, COLLAR_H))
+    # drawn as seen from outside at the back of the neck, where CLO's Neck_Collar point wraps it:
+    # left front first (drawn from the right front, CLO put it on face-in)
+    s.sew_edges(collar, [0, 0], [a, 0], front_l, [-EXTENSION, neck_front_y], [NECK_HALF, NECK_Y])
+    s.sew_edges(collar, [a, 0], [a + b, 0], back, [-NECK_HALF, NECK_Y], [NECK_HALF, NECK_Y])
+    s.sew_edges(collar, [a + b, 0], [total, 0], front_r, [-NECK_HALF, NECK_Y], [EXTENSION, neck_front_y])
+    s.set_pattern_state(collar, strengthened=True)   # stands like an interfaced stand collar
+    step("stand collar %.0f x %d mm, strengthened" % (total, COLLAR_H))
 
     # --- dress the avatar ---
     # arrangement points are centred on each piece; the _3 points (55 % up the torso) put a
@@ -149,6 +153,13 @@ if __name__ == "__main__":
                     (collar, "Neck_Collar")):
         s.place_pattern(p, arrangement_index=arrangement(name))
     step("placed on the avatar")
+
+    # --- contrast edge stitching on every seam and raw edge, as on the reversible original ---
+    style = s.create_topstitch_style("Contrast edge", thread_thickness_mm=0.3, offset_mm=3.0)
+    s.set_topstitch_style(style["style_index"], color=list(THREAD))
+    done = s.topstitch_all(style["style_index"])
+    step("contrast stitching: %d seams, %d edges%s" % (done["seams"], done["edges"],
+                                                         ", failed %s" % done["failed"] if done["failed"] else ""))
     s.save_checkpoint("jacket_arranged")
     for _ in range(6):
         s.simulate(50)

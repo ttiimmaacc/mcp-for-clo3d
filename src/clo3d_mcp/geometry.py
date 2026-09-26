@@ -186,3 +186,23 @@ def find_edge(piece, start, end, tolerance=2.0):
             return line["line_index"], False
     ends = ", ".join("%d: %s-%s" % (l["line_index"], l["start"], l["end"]) for l in piece["lines"])
     raise ValueError("no line of %s runs from %s to %s (lines: %s)" % (piece.get("name"), start, end, ends))
+
+
+def free_edges(summary, pattern_indices=None):
+    """Outline lines that no seam uses: [(pattern_index, line_index), ...], for finishing
+    raw edges (hems, front edges, cuffs, collar tops)."""
+    sewn = set()
+    for seam in summary.get("seams", []):
+        for side in seam["sides"]:
+            if side.get("internal_shape") is None:
+                for line in side.get("lines", []):
+                    sewn.add((side.get("pattern_index"), line["line_index"]))
+    edges = []
+    for piece in summary["pieces"]:
+        if pattern_indices is not None and piece["pattern_index"] not in pattern_indices:
+            continue
+        for line in piece["lines"]:
+            key = (piece["pattern_index"], line["line_index"])
+            if key not in sewn:
+                edges.append(key)
+    return edges
