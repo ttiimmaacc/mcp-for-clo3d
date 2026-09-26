@@ -27,6 +27,10 @@ from clo3d_mcp.geometry import find_edge, summarize  # noqa: E402
 AVATAR = r"C:\Users\Public\Documents\CLO\CLO Assets\Avatar\Male\MV2.1_Luka.avt"
 WOOL = r"C:\Users\Public\Documents\CLO\CLO Assets\Fabric\V2_Woven_Melton_Boiled_1.zfab"
 
+# Grey/black workwear check, one 120 mm repeat, and the plain charcoal back face
+PLAID = [["#1b1b1d", 45], ["#5d5d60", 6], ["#1b1b1d", 6], ["#5d5d60", 35], ["#8e8e90", 3], ["#5d5d60", 25]]
+CHARCOAL = [92, 92, 96]
+
 # Measurements (mm)
 HALF_SHOULDER = 400.0        # centre to the dropped shoulder seam
 HALF_CHEST = 270.0           # chest 54 cm laid flat: each front and half the back
@@ -78,6 +82,8 @@ if __name__ == "__main__":
     points_by_name = s.get_arrangement_points()["arrangement_points"]
     fabric = s.add_fabric(WOOL)["fabric_index"]
     s.set_fabric_information(fabric, {"Content": "100% Wool, double-faced"}, name="Double-faced wool")
+    # double-faced: grey/black plaid outside, plain charcoal inside
+    s.apply_plaid(fabric, PLAID, back_color=CHARCOAL)
     step("avatar and fabric ready (fabric %d)" % fabric)
 
     # --- body: back and two fronts, dropped shoulders, side slits ---

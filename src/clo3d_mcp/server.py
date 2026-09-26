@@ -787,7 +787,7 @@ def assign_fabric_to_pattern(
 
 
 @mcp.tool()
-def set_fabric_color(fabric_index: int, r: int = 255, g: int = 255, b: int = 255) -> dict:
+def set_fabric_color(fabric_index: int, r: int = 255, g: int = 255, b: int = 255, face: str = "front") -> dict:
     """Set the PBR base color of a fabric.
 
     Args:
@@ -795,8 +795,67 @@ def set_fabric_color(fabric_index: int, r: int = 255, g: int = 255, b: int = 255
         r: Red channel (0-255).
         g: Green channel (0-255).
         b: Blue channel (0-255).
+        face: "front", "back" or "side". The back and side only show their own colour once
+            set_fabric_faces has separated them from the front.
     """
-    return _send("set_fabric_color", {"fabric_index": fabric_index, "r": r, "g": g, "b": b})
+    faces = {"front": 0, "back": 1, "side": 2}
+    return _send("set_fabric_color", {"fabric_index": fabric_index, "r": r, "g": g, "b": b,
+                                      "material_face": faces[face]})
+
+
+@mcp.tool()
+def set_fabric_faces(fabric_index: int, separate_back: bool = True, back_color: list[int] | None = None) -> dict:
+    """Give a fabric a back face of its own, for double-faced and reversible cloth (e.g. plaid
+    on the front, solid charcoal on the back), or join it to the front again. Do this before
+    texturing the front: a back separated afterwards copies the front's texture.
+
+    Args:
+        fabric_index: Fabric to change.
+        separate_back: True for its own back material and colour, False to use the front's.
+        back_color: Optionally set the back's colour at the same time, [r, g, b] 0-255.
+    """
+    # SetUseSameColorAsFront raised a native exception in CLO 2025.2.236; a separate back
+    # material already has its own colour, so only the material flag is set
+    result = _send("set_fabric_faces", {"fabric_index": fabric_index, "face": 1,
+                                        "separate_material": separate_back})
+    if back_color is not None:
+        _send("set_fabric_color", {"fabric_index": fabric_index, "r": back_color[0], "g": back_color[1],
+                                   "b": back_color[2], "material_face": 1})
+    return result
+
+
+@mcp.tool()
+def set_fabric_texture(fabric_index: int, file_path: str) -> dict:
+    """Use an image (PNG, JPG) as a fabric's base texture."""
+    return _send("set_fabric_texture", {"fabric_index": fabric_index, "file_path": file_path})
+
+
+@mcp.tool()
+def apply_plaid(fabric_index: int, sett: list[list], px_per_mm: float = 4.0, twill: bool = True,
+                back_color: list[int] | None = None) -> dict:
+    """Make a plaid (tartan) texture from its stripe sequence and put it on a fabric. The same
+    stripes run both ways; where two colours cross they mix in a twill, as in woven checks.
+
+    Args:
+        fabric_index: Fabric to texture.
+        sett: One repeat as [[colour, width_mm], ...], e.g. a grey/black workwear check:
+            [["#1b1b1d", 45], ["#5d5d60", 6], ["#1b1b1d", 6], ["#5d5d60", 35], ["#8e8e90", 3],
+             ["#5d5d60", 35]]. The repeat is the sum of the widths.
+        px_per_mm: Image resolution.
+        twill: Mix crossing colours along diagonals (woven look) instead of averaging them.
+        back_color: For double-faced cloth, a plain back in this colour [r, g, b]. The back
+            is separated before the plaid goes on: separated afterwards, it copies the plaid
+            (tested in CLO 2025.2.236).
+    """
+    from clo3d_mcp.textures import plaid, save_with_size
+    if back_color is not None:
+        set_fabric_faces(fabric_index, True, back_color=back_color)
+    stripes = [(str(c), float(w)) for c, w in sett]
+    repeat = sum(w for _, w in stripes)
+    path = os.path.join(_work_dir("textures"), "plaid_%d.png" % int(time.time() * 1000))
+    dpi = save_with_size(plaid(stripes, px_per_mm, twill), path, repeat)
+    result = _send("set_fabric_texture", {"fabric_index": fabric_index, "file_path": path})
+    return dict(result, file_path=path, repeat_mm=repeat, dpi=round(dpi, 1))
 
 
 @mcp.tool()

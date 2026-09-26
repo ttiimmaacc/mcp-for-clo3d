@@ -451,6 +451,26 @@ std::map<std::string, Handler> BuildHandlers()
 			list.a.push_back(Value::object().set("index", i).set("name", FABRIC_API->GetFabricName((int)i)));
 		return Value::object().set("fabrics", list).set("count", count);
 	};
+	h["set_fabric_faces"] = [](const Value& p) {
+		unsigned int fabric = U(p, "fabric_index");
+		int face = I(p, "face", 1);   // 1: back, 2: side
+		if (face != 1 && face != 2)
+			throw std::runtime_error("face must be 1 (back) or 2 (side)");
+		if (p.has("separate_material"))
+			FABRIC_API->SetUseSameMaterialAsFront(fabric, face, !p.boolean("separate_material", false));
+		if (p.has("separate_color"))
+			FABRIC_API->SetUseSameColorAsFront(fabric, face, !p.boolean("separate_color", false));
+		return Value::object().set("fabric_index", fabric).set("face", face)
+			.set("same_material_as_front", FABRIC_API->GetUseSameMaterialAsFront(fabric, face))
+			.set("same_color_as_front", FABRIC_API->GetUseSameColorAsFront(fabric, face));
+	};
+	h["set_fabric_texture"] = [](const Value& p) {
+		int fabric = I(p, "fabric_index");
+		FABRIC_API->SetBaseTextureMapImageGivenFilePath(p.str("file_path"), fabric);
+		return Value::object().set("fabric_index", fabric)
+			.set("texture", FABRIC_API->GetBaseTextureMapImageFilePath(fabric))
+			.set("mapping", FABRIC_API->GetFabricTextureMappingType(fabric));
+	};
 	h["get_fabric_info"] = [](const Value& p) {
 		int fabric = I(p, "fabric_index");
 		Value info = Value::object();
