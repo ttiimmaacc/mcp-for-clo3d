@@ -30,8 +30,14 @@ TOP = H - BAND               # the panels' top edge
 HEADER = (174.0, 845.0, TOP - 220.0, TOP - 10.0)      # x0, x1, y0, y1
 # The rod lies on the +z side of the band, so the curtain's decorative face points at CLO's
 # "back" camera (-z). Seen from there, left and right swap: 2D x 0..525 is the viewer's right panel.
-LEFT = {"band_top": 220.0, "strip_x": 149.0, "strip_top": 530.0, "square": (149.0, 318.0, 220.0, 375.0)}
-RIGHT = {"band_top": 231.0, "strip_x": 875.0, "strip_top": 531.0, "square": (712.0, 875.0, 369.0, 531.0)}
+# The two panels mirror each other in height: one band top, one side-strip top and one square
+# size for both (the photo gave each side its own values, up to 11 mm apart).
+BAND_TOP, STRIP_TOP = 225.0, 530.0
+SQUARE_W, SQUARE_H = 165.0, 160.0
+LEFT = {"band_top": BAND_TOP, "strip_x": 149.0, "strip_top": STRIP_TOP,
+        "square": (149.0, 149.0 + SQUARE_W, BAND_TOP, BAND_TOP + SQUARE_H)}           # on the band
+RIGHT = {"band_top": BAND_TOP, "strip_x": 875.0, "strip_top": STRIP_TOP,
+         "square": (875.0 - SQUARE_W, 875.0, STRIP_TOP - SQUARE_H, STRIP_TOP)}         # level with the strip top
 FACE = -1               # pattern layer of the face patches: -1 = towards the back camera
 # On the back (+z): bottom hems on layer 1, side hems crossing them on 2, reverse patches on 3
 HEM_BOTTOM_LAYER, HEM_SIDE_LAYER, REVERSE_PATCH = 1, 2, 3
