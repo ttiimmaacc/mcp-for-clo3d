@@ -166,11 +166,8 @@ pleats, draw fold lines with the internal-line tools and let the simulation fold
 
 ## How it works
 
-CLO's embedded Python cannot serve requests in the background (threads stop once a script returns,
-a polling loop freezes CLO, there are no Qt bindings for a timer, and `rest_api.CallbackRestRequest`
-cannot take a Python callback in this build). So the CLO side is a small C++ plug-in built on CLO's
-official SDK. It runs a timer on CLO's UI thread, so every request runs on the main thread between
-UI events, in roughly 50 ms.
+The CLO side is a small C++ plug-in built on CLO's official SDK. It runs a timer on CLO's UI
+thread, so every request runs on the main thread between UI events, in roughly 50 ms.
 
 - The **MCP server** (`src/clo3d_mcp`) writes `request.json` to `%TEMP%\clo3d_mcp` (override
   with `CLO3D_MCP_DIR`) and waits up to 180 s for `response.json`. Both sides write to a temp
