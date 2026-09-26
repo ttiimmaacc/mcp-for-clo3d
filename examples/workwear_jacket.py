@@ -157,7 +157,8 @@ if __name__ == "__main__":
     # overlock shape and grey thread come from a style saved from CLO (Shape: Overlock); pass it
     # once as template_path, later runs reuse the stored "overlock" template
     saved = os.path.join(os.path.dirname(__file__), "..", "overlock.sst")
-    style = s.create_topstitch_style("Overlock edge", thread_thickness_mm=0.5, offset_mm=2.0, template="overlock",
+    style = s.create_topstitch_style("Overlock edge", thread_thickness_mm=1.0, stitch_length_mm=2.0, offset_mm=1.5,
+                                     template="overlock",
                                      template_path=saved if os.path.exists(saved) else None)
     done = s.topstitch_all(style["style_index"])
     step("contrast stitching: %d seams, %d edges%s" % (done["seams"], done["edges"],
