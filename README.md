@@ -1,92 +1,77 @@
 # MCP for CLO3D
 
-Control CLO3D from Claude, Codex, Cursor or any MCP client: inspect projects, build and edit
-pattern pieces, manage fabrics and colorways, run simulations and export models, all from a chat.
+Control CLO3D from an AI assistant such as Claude, Codex or Cursor: ask in plain language and it
+inspects your project, builds and sews pattern pieces, manages fabrics, runs the simulation,
+takes pictures of the result and exports models, pattern PDFs and DXF files.
 
 ```
 AI assistant  <-- MCP -->  MCP server (Python)  <-- files -->  CLO plug-in (native DLL)  -->  CLO3D
-                           src/clo3d_mcp          %TEMP%\clo3d_mcp   cpp_plugin/
 ```
 
-CLO stays fully usable while the plug-in listens. Requests are answered in roughly 50 ms.
+CLO stays fully usable while the plug-in listens in the background.
 
-Tested with **CLO 2025.2.236 on Windows**.
+## Before you start
 
-## Why a native plug-in
+You need:
 
-CLO's embedded Python cannot serve requests in the background:
+| What | How to check or get it |
+|------|------------------------|
+| **Windows 10 or 11** (64-bit) | The plug-in is a Windows DLL; macOS is not supported. |
+| **CLO3D 2025.2.236**, exactly this version | CLO shows its version at the bottom left of its window (*Version: 2025.2.236*). The plug-in only works with the CLO build it was made for; for another version, [build it yourself](#or-build-the-plug-in-yourself). |
+| **An MCP client** | [Claude Desktop](https://claude.ai/download), [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), Cursor or any other app that supports MCP servers. |
+| **uv** (runs the Python server and installs Python for you) | In PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"`, then open a new terminal. See [docs.astral.sh/uv](https://docs.astral.sh/uv/). |
+| **Git** (uv uses it to fetch the server) | [git-scm.com/download/win](https://git-scm.com/download/win), or `winget install Git.Git`. |
 
-- background threads stop running once a script returns,
-- a polling loop on the main thread freezes CLO,
-- CLO ships no Qt bindings for Python, so there is no timer to hook, and
-- `rest_api.CallbackRestRequest`, the only asynchronous call, cannot accept a Python callback
-  in this build.
-
-So the CLO side is a small C++ plug-in built on CLO's official SDK. It runs a timer on CLO's UI
-thread, so every request is executed on the main thread between UI events.
+You do **not** need Visual Studio or CLO's SDK unless you build the plug-in yourself.
 
 ## Setup
 
-### 1. Get the plug-in DLL
+### 1. Download the plug-in
 
 Download `CloMcpPlugin.dll` from the
-[latest release](https://github.com/ttiimmaacc/mcp-for-clo3d/releases/latest). Each release says
-which CLO version it's for, and the DLL only works with that exact CLO build (currently
-**2025.2.236**). GitHub Actions builds every release from this repo against CLO's official SDK,
-and each release includes the DLL's SHA-256 checksum.
+[latest release](https://github.com/ttiimmaacc/mcp-for-clo3d/releases/latest). The release notes
+say which CLO version it is for (currently **2025.2.236**). GitHub builds every release from this
+repository with CLO's official SDK, and each release lists the DLL's SHA-256 checksum.
+
+### 2. Install it so CLO loads it at startup
+
+1. **Close CLO.**
+2. Copy `CloMcpPlugin.dll` into `C:\Users\Public\Documents\CLO\Plugins\` (create the `Plugins`
+   folder if it doesn't exist) and **rename the copy to `CloLibraryAPI_Plugin.dll`**. CLO loads a
+   plug-in with exactly that name every time it starts.
+   - If you cloned this repository, `cpp_plugin\install_autostart.bat path\to\CloMcpPlugin.dll`
+     does the copy and rename for you (`install_autostart.bat /remove` undoes it).
+   - If a `CloLibraryAPI_Plugin.dll` is already there, it belongs to another plug-in: keep a copy
+     of it, because this replaces it.
+3. **Start CLO.** Nothing visible changes: the listener starts quietly in the background.
 
 <details>
-<summary>Or build it yourself (needed for any other CLO version)</summary>
+<summary>Optional: an on/off switch in CLO's Plugins menu</summary>
 
-CLO's SDK files can't be redistributed, so you download the SDK yourself.
-
-1. Install **Visual Studio Build Tools** with the *Desktop development with C++* workload.
-2. Download the CLO SDK that matches your CLO version from
-   [developer.clo3d.com/download.html](https://developer.clo3d.com/download.html)
-   (CLO 2025.2.236 → SDK v9.1.0, `CLO_SDK_v2025.2.236_WIN.zip`) and unzip it.
-3. Point `CLO_SDK_DIR` at the unzipped folder (the one containing `CLOAPIInterface\`) and build:
-   ```bat
-   set CLO_SDK_DIR=C:\path\to\CLO_SDK_v2025.2.236_WIN
-   cpp_plugin\build.bat
-   python cpp_plugin\check_runtime.py
-   ```
-   `check_runtime.py` confirms that every C++ runtime function the DLL imports exists in the
-   runtime DLLs your CLO install ships, because CLO loads its own copies.
-
-> **Use the SDK for your exact CLO version.** The plug-in calls CLO through C++ vtables. Headers
-> from another CLO version put functions at different slots and will call the wrong ones.
+Open **Plugins → Plug-in Manager → + ADD**, choose a copy of `CloMcpPlugin.dll` that is *outside*
+the Plugins folder, give it a name and click **OK**. **Plugins → Plug-in → &lt;your name&gt;** then
+stops or starts the listener and shows its new state. Without the autostart copy, this menu entry
+alone also works, but CLO only loads it when you click it, so click it once per CLO session.
 
 </details>
 
-### 2. Load it in CLO
+### 3. Check that it is running
 
-**Recommended: autostart plus a menu toggle.**
+Paste `%TEMP%\clo3d_mcp` into the File Explorer address bar and open `status.json`. It should say
+`"state": "listening"`, and its `ticks` number should grow each time you reopen the file. If the
+folder or file is missing, see [Troubleshooting](#troubleshooting).
 
-1. Close CLO and run `cpp_plugin\install_autostart.bat path\to\CloMcpPlugin.dll`. This copies
-   the DLL to `C:\Users\Public\Documents\CLO\Plugins\CloLibraryAPI_Plugin.dll`, which CLO loads at
-   startup, so the listener runs as soon as CLO opens. `install_autostart.bat /remove` undoes it.
-2. Optionally, for an on/off switch: open **Plugins → Plug-in Manager → + ADD**, choose
-   `CloMcpPlugin.dll` (a copy outside the Plugins folder), name it, and click **OK**. This adds
-   **Plugins → Plug-in → <your name>**, which stops or starts the listener and shows a message box
-   with the new state. The autostart copy adds no menu entry of its own, so the listener is listed
-   once.
+### 4. Connect your AI assistant
 
-Without autostart, the Plug-in Manager entry alone also works. CLO only loads it when you click
-the menu item, so click it once per CLO session.
-
-To check that it is running, open `%TEMP%\clo3d_mcp\status.json`. It should show
-`"state": "listening"` and a `ticks` count that keeps rising.
-
-### 3. Connect your MCP client
-
-The server runs with [uv](https://docs.astral.sh/uv/).
+Add the server to your MCP client. `uvx` downloads and runs it; there is nothing else to install.
 
 **Claude Code**
 ```bash
 claude mcp add clo3d -- uvx --from git+https://github.com/ttiimmaacc/mcp-for-clo3d.git mcp-for-clo3d
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`)
+**Claude Desktop**: open *Settings → Developer → Edit Config*, add this to
+`claude_desktop_config.json`, then restart Claude Desktop:
 ```json
 {
   "mcpServers": {
@@ -106,10 +91,41 @@ args = ["--from", "git+https://github.com/ttiimmaacc/mcp-for-clo3d.git", "mcp-fo
 tool_timeout_sec = 200   # simulations and exports can take up to 180 s
 ```
 
-Only connect one client to CLO at a time, because they share the same request file.
+Connect only one client to CLO at a time, because they share the same request file.
 
-Then ask things like *"What's in this project?"*, *"Create a rectangle pattern 400 × 600 mm"*,
-*"Run 100 simulation steps and export a GLB to my desktop"*.
+### 5. Try it
+
+With CLO open, ask your assistant things like:
+
+- *"What's in this CLO project?"*
+- *"Create a 400 × 600 mm rectangle pattern and show me the 2D pieces."*
+- *"Run 100 simulation steps and show me the garment from the front and the side."*
+- *"Export a GLB to my desktop."*
+
+CLO's API has no undo, so for bigger changes ask the assistant to *save a checkpoint* first.
+
+### Or build the plug-in yourself
+
+Needed for any CLO version other than the one the release was built for.
+
+1. Install **Visual Studio Build Tools** with the *Desktop development with C++* workload.
+2. Download the CLO SDK that matches your CLO version from
+   [developer.clo3d.com/download.html](https://developer.clo3d.com/download.html)
+   (CLO 2025.2.236 → SDK v9.1.0, `CLO_SDK_v2025.2.236_WIN.zip`) and unzip it. CLO's SDK can't be
+   redistributed, so it is not included here.
+3. Clone this repository, point `CLO_SDK_DIR` at the unzipped folder (the one containing
+   `CLOAPIInterface\`) and build:
+   ```bat
+   set CLO_SDK_DIR=C:\path\to\CLO_SDK_v2025.2.236_WIN
+   cpp_plugin\build.bat
+   python cpp_plugin\check_runtime.py
+   ```
+   `check_runtime.py` confirms that every C++ runtime function the DLL imports exists in the
+   runtime DLLs your CLO install ships, because CLO loads its own copies.
+4. Install `cpp_plugin\dist\CloMcpPlugin.dll` as in step 2.
+
+> **Use the SDK for your exact CLO version.** The plug-in calls CLO through C++ vtables. Headers
+> from another CLO version put functions at different slots and call the wrong ones.
 
 ## Tools
 
@@ -149,6 +165,12 @@ and editing or removing an existing seam. Two SDK functions exist but did nothin
 pleats, draw fold lines with the internal-line tools and let the simulation fold them.
 
 ## How it works
+
+CLO's embedded Python cannot serve requests in the background (threads stop once a script returns,
+a polling loop freezes CLO, there are no Qt bindings for a timer, and `rest_api.CallbackRestRequest`
+cannot take a Python callback in this build). So the CLO side is a small C++ plug-in built on CLO's
+official SDK. It runs a timer on CLO's UI thread, so every request runs on the main thread between
+UI events, in roughly 50 ms.
 
 - The **MCP server** (`src/clo3d_mcp`) writes `request.json` to `%TEMP%\clo3d_mcp` (override
   with `CLO3D_MCP_DIR`) and waits up to 180 s for `response.json`. Both sides write to a temp
@@ -193,8 +215,13 @@ the result.
 
 ## Troubleshooting
 
-- **The client times out:** check `status.json`. If it's missing or `ticks` isn't rising, start
-  the listener from **Plugins → Plug-in**.
+- **`%TEMP%\clo3d_mcp\status.json` is missing:** CLO didn't load the plug-in. Check that the
+  file in `C:\Users\Public\Documents\CLO\Plugins\` is named exactly `CloLibraryAPI_Plugin.dll`,
+  that it matches your CLO version, and that you restarted CLO after copying it.
+- **The client times out:** check `status.json`. If `ticks` isn't rising, start the listener
+  from **Plugins → Plug-in** (with the optional menu entry), or restart CLO.
+- **`uvx` is not recognised:** open a new terminal after installing uv, or restart your MCP
+  client so it picks up the new PATH.
 - **Rebuilding fails with `LNK1104: cannot open file ...CloMcpPlugin.dll`:** CLO has the DLL
   loaded. Close CLO, or rename the loaded DLL (Windows allows renaming a file that's in use) and
   rebuild. CLO keeps using the old copy until it restarts. With autostart, run
