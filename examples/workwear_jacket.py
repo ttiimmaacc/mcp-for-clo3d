@@ -25,7 +25,7 @@ import clo3d_mcp.server as s  # noqa: E402
 from clo3d_mcp.geometry import find_edge, summarize  # noqa: E402
 
 AVATAR = r"C:\Users\Public\Documents\CLO\CLO Assets\Avatar\Male\MV2.1_Luka.avt"
-POSE = r"C:\Users\Public\Documents\CLO\CLO Assets\Avatar\Pose01.pos"   # saved in CLO: arms lowered
+POSE = r"C:\Users\Public\Documents\CLO\CLO Assets\Avatar\Standing01.pos"   # default pose, made in CLO
 WOOL = r"C:\Users\Public\Documents\CLO\CLO Assets\Fabric\V2_Woven_Melton_Boiled_1.zfab"
 
 # Grey/black workwear check, one 120 mm repeat, and the plain charcoal back face
@@ -93,7 +93,7 @@ if __name__ == "__main__":
         s._apply_parts([])
     if not s.get_avatars()["count"]:
         s.import_avatar(AVATAR)
-    if os.path.exists(POSE):   # arms lowered from CLO's A-pose: the dropped shoulders sit much better
+    if os.path.exists(POSE):   # a natural standing pose instead of CLO's A-pose
         s.import_file(POSE)
     points_by_name = s.get_arrangement_points()["arrangement_points"]
     fabric = s.add_fabric(WOOL)["fabric_index"]
