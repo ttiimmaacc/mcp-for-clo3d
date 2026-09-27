@@ -25,6 +25,7 @@ import clo3d_mcp.server as s  # noqa: E402
 from clo3d_mcp.geometry import find_edge, summarize  # noqa: E402
 
 AVATAR = r"C:\Users\Public\Documents\CLO\CLO Assets\Avatar\Male\MV2.1_Luka.avt"
+POSE = r"C:\Users\Public\Documents\CLO\CLO Assets\Avatar\Pose01.pos"   # saved in CLO: arms lowered
 WOOL = r"C:\Users\Public\Documents\CLO\CLO Assets\Fabric\V2_Woven_Melton_Boiled_1.zfab"
 
 # Grey/black workwear check, one 120 mm repeat, and the plain charcoal back face
@@ -41,13 +42,14 @@ COLLAR_H = 65.0
 NECK_HALF = 95.0             # half the neck opening across
 FRONT_NECK_DROP = 85.0
 EXTENSION = 25.0             # button extension past centre front
-SHOULDER_Y = LENGTH - 25.0   # height of the dropped shoulder point
+SHOULDER_Y = LENGTH - 55.0   # height of the dropped shoulder point (sloping shoulder, refined in CLO)
 # deep, boxy armhole: straight down from the dropped shoulder, then curving in to the side seam
 # (in the brand's diagram the chest line sits about halfway down the body)
-ARMHOLE_DEPTH = 240.0       # verified: with the low-cap two-piece sleeve this drapes cleanly once the
-                            # sleeves are nudged onto the arms with CLO's Move tool (see the note at the end)
-UNDERARM_Y = SHOULDER_Y - ARMHOLE_DEPTH           # side seam top
-ARM_CURVE = (HALF_SHOULDER - 15.0, UNDERARM_Y + 110.0)   # curve point: near vertical above it
+# deep, boxy armhole, refined by hand in CLO: straight down from the dropped shoulder, then
+# curving in to an underarm 3 cm outside the chest line, so the side seam flares up from the slit
+UNDERARM_Y = 315.0                                 # side seam top
+UNDERARM_X = HALF_CHEST + 30.0
+ARM_CURVE = (HALF_SHOULDER - 17.3, UNDERARM_Y + 133.5)   # curve point: near vertical above it
 NECK_Y = LENGTH + 20.0       # height of the neck point (shoulder rises to it)
 SLIT = 100.0                 # side slits above the hem
 # kangaroo pocket half, in front coordinates (x outwards from centre front, y up from the hem)
@@ -58,6 +60,8 @@ SHOULDER_LINE = math.hypot(HALF_SHOULDER - NECK_HALF, NECK_Y - SHOULDER_Y)
 SLEEVE = SLEEVE_FROM_COLLAR - SHOULDER_LINE   # dropped shoulder seam to the cuff edge
 CUFF_HALF = 165.0            # half the cuff width (33 cm round)
 CAP_HEIGHT = 60.0            # low sleeve cap for a dropped shoulder
+SLEEVE_HALF = 257.0          # half the sleeve width at the cap (51 cm round), refined in CLO
+SLEEVE_BODY = 381.7          # sleeve length along its centre, cap point to the cuff seam
 
 log = []
 
@@ -89,6 +93,8 @@ if __name__ == "__main__":
         s._apply_parts([])
     if not s.get_avatars()["count"]:
         s.import_avatar(AVATAR)
+    if os.path.exists(POSE):   # arms lowered from CLO's A-pose: the dropped shoulders sit much better
+        s.import_file(POSE)
     points_by_name = s.get_arrangement_points()["arrangement_points"]
     fabric = s.add_fabric(WOOL)["fabric_index"]
     s.set_fabric_information(fabric, {"Content": "100% Wool, double-faced"}, name="Double-faced wool")
@@ -99,20 +105,20 @@ if __name__ == "__main__":
     # --- body: back and two fronts, dropped shoulders, side slits ---
     sx, sy = HALF_SHOULDER, SHOULDER_Y
     cx, cy = ARM_CURVE
-    back, back_lines = piece([[-HALF_CHEST, 0], [HALF_CHEST, 0], [HALF_CHEST, SLIT], [HALF_CHEST, UNDERARM_Y],
+    back, back_lines = piece([[-HALF_CHEST, 0], [HALF_CHEST, 0], [HALF_CHEST, SLIT], [UNDERARM_X, UNDERARM_Y],
                               [cx, cy, 2], [sx, sy], [NECK_HALF, NECK_Y], [0, LENGTH, 2], [-NECK_HALF, NECK_Y],
-                              [-sx, sy], [-cx, cy, 2], [-HALF_CHEST, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Back")
+                              [-sx, sy], [-cx, cy, 2], [-UNDERARM_X, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Back")
     neck_front_y = NECK_Y - FRONT_NECK_DROP - 20
     front_r, fr_lines = piece([[-HALF_CHEST, 0], [EXTENSION, 0], [EXTENSION, neck_front_y],
                                [-NECK_HALF * 0.55, neck_front_y + 18, 2], [-NECK_HALF, NECK_Y],
-                               [-sx, sy], [-cx, cy, 2], [-HALF_CHEST, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Front right")
-    front_l, fl_lines = piece([[-EXTENSION, 0], [HALF_CHEST, 0], [HALF_CHEST, SLIT], [HALF_CHEST, UNDERARM_Y],
+                               [-sx, sy], [-cx, cy, 2], [-UNDERARM_X, UNDERARM_Y], [-HALF_CHEST, SLIT]], "Front right")
+    front_l, fl_lines = piece([[-EXTENSION, 0], [HALF_CHEST, 0], [HALF_CHEST, SLIT], [UNDERARM_X, UNDERARM_Y],
                                [cx, cy, 2], [sx, sy], [NECK_HALF, NECK_Y], [NECK_HALF * 0.55, neck_front_y + 18, 2],
                                [-EXTENSION, neck_front_y]], "Front left")
     # shoulders (neck point to shoulder point) and sides (underarm to slit top), right then left
     for front, sign in ((front_r, -1), (front_l, 1)):
         neck, shoulder = [sign * NECK_HALF, NECK_Y], [sign * sx, sy]
-        underarm, slit = [sign * HALF_CHEST, UNDERARM_Y], [sign * HALF_CHEST, SLIT]
+        underarm, slit = [sign * UNDERARM_X, UNDERARM_Y], [sign * HALF_CHEST, SLIT]
         m = lambda p: [-p[0], p[1]]      # the same side of the body on the back
         s.sew_edges(back, m(neck), m(shoulder), front, neck, shoulder)
         s.sew_edges(back, m(underarm), m(slit), front, underarm, slit)
@@ -133,13 +139,13 @@ if __name__ == "__main__":
     # --- sleeves: flat dropped-shoulder sleeve; the top's midpoint is the shoulder point ---
     # armhole seam length on each body piece (curved), read back from CLO
     pz = summarize(s._send("get_pattern_geometry"), back)["pieces"][0]
-    li, _ = find_edge(pz, [sx, sy], [HALF_CHEST, UNDERARM_Y])
+    li, _ = find_edge(pz, [sx, sy], [UNDERARM_X, UNDERARM_Y])
     arm = next(l["length"] for l in pz["lines"] if l["line_index"] == li)
-    bs = SLEEVE - CUFF_H
+    bs = SLEEVE_BODY
     # dropped shoulder: a low, flat cap (the body already covers the shoulder); a tall set-in
     # style cap collapsed into wrinkles. The sleeve's width follows from the armhole length.
     cap = CAP_HEIGHT
-    half = math.sqrt(arm ** 2 - cap ** 2)
+    half = SLEEVE_HALF   # narrower than the armhole allows: the cap edges (26.4 cm) ease into 29.6 cm armholes
     low = bs - cap
     sleeves = {}
     # two-piece sleeve: a front and a back panel, seamed over the top of the arm (from the
@@ -157,7 +163,7 @@ if __name__ == "__main__":
         bp, _ = piece(minus if fx > 0 else plus, "Sleeve %s back" % side)
         s.sew_edges(fp, [0, bs], [0, 0], bp, [0, bs], [0, 0])                                       # over-arm
         s.sew_edges(fp, [fx * half, low], [fx * CUFF_HALF, 0], bp, [-fx * half, low], [-fx * CUFF_HALF, 0])  # underarm
-        shoulder, underarm = [sign * sx, sy], [sign * HALF_CHEST, UNDERARM_Y]
+        shoulder, underarm = [sign * sx, sy], [sign * UNDERARM_X, UNDERARM_Y]
         s.sew_edges(fp, [0, bs], [fx * half, low], front, shoulder, underarm)
         s.sew_edges(bp, [0, bs], [-fx * half, low], back, [-shoulder[0], shoulder[1]], [-underarm[0], underarm[1]])
         # cuff: top edge split at its middle, one half to each panel, closed into a tube
@@ -225,9 +231,17 @@ if __name__ == "__main__":
     step("contrast stitching: %d seams, %d edges%s" % (done["seams"], done["edges"],
                                                          ", failed %s" % done["failed"] if done["failed"] else ""))
     s.save_checkpoint("jacket_arranged")
+    if "--no-simulate" in sys.argv:
+        # stop before draping, e.g. to nudge the back body and back sleeve panels up at the shoulder
+        # seam with CLO's Move tool (the API cannot move pieces freely), then simulate in CLO or run
+        # `uv run python -c "import clo3d_mcp.server as s; s.simulate(300)"`
+        step("placed and sewn, not simulated (--no-simulate)")
+        sys.exit(0)
     for _ in range(6):
         s.simulate(50)
     step("simulated; done in %.0f s" % (time.time() - t0))
     # Known limit: CLO's API only places pieces on arrangement points (no free 3D move), and the
-    # sleeves can start partly off the arms, leaving the arm through the armhole seam at the back
-    # of the upper arm. A nudge with CLO's Move tool before simulating fixes it.
+    # arm can end up caught between the back and the back sleeve panels, through the armhole seam
+    # at the back of the upper arm. Tested without success: other points, positions, a larger
+    # offset, simulating the sleeves first. What works: build with --no-simulate, nudge the back
+    # pieces up at the shoulder seam with CLO's Move tool, then simulate.
