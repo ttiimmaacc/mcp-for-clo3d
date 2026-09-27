@@ -171,6 +171,7 @@ Needed for any CLO version other than the one the release was built for.
 | Fabric details | `get_fabric_info`, `set_fabric_information` (name, content such as 60% cotton / 40% linen), `set_fabric_physics` (weight, thickness, stretch, shear, bending...; keeps colour, texture and name), `export_fabric` (.zfab), `apply_fabric_json` |
 | Hanging on a rod | `hang_on_rod`: sews a header band to each panel's top edge, freezes it and lays a rod along it, so curtains, noren and banners hang reliably (the band stands in for the pocket; the rod lies against it). `make_rod_pocket`: a real folded pocket around the rod. Verified with a single 1000 × 1500 mm panel; with several panels it often fails to wrap |
 | Checkpoints | `save_checkpoint`, `list_checkpoints`, `restore_checkpoint`: CLO's API has no undo, so save the scene before risky edits and reopen it if something goes wrong |
+| CLO's dialogs & restart | Commands no longer hang on CLO's pop-ups. Dialogs that only report something (OK / Close) are answered and returned in the result's `clo_dialogs`; when one says the command failed (e.g. "Failed to read the Project file" while the API claims success) the command raises that error. A dialog that needs a decision, such as "File not saved. Do you want to save?", stops the command at once with its text and buttons: `get_clo_dialog` shows it, `answer_clo_dialog` clicks a button and returns the command's result. `open_file` and `new_project` take `discard_unsaved`. `restart_clo` saves the scene as a checkpoint, closes CLO, optionally installs a rebuilt plug-in, starts CLO, waits for the plug-in and reopens the scene (answering CLO's autosave prompt, as the checkpoint is newer). Windows only, through UI Automation |
 | Geometry | `get_pattern_geometry`: pieces with numbered outline lines (length, endpoints), internal shapes, and every seam mapped to the lines it uses |
 | Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `mirror_pattern`, `unfold_pattern`, `move_pattern_2d` |
 | Sewing | `sew_edges` (two edges given by their end points, sewn in the direction given, so seams never twist), `sew_lines` (outline or internal-shape lines), `add_topstitch`, `topstitch_all` (every seam and/or free edge), `list_topstitch_styles`, `set_seam_taping` |
@@ -247,13 +248,15 @@ the result.
   file in `C:\Users\Public\Documents\CLO\Plugins\` is named exactly `CloLibraryAPI_Plugin.dll`,
   that it matches your CLO version, and that you restarted CLO after copying it.
 - **The client times out:** check `status.json`. If `ticks` isn't rising, start the listener
-  from **Plugins → Plug-in** (with the optional menu entry), or restart CLO.
+  from **Plugins → Plug-in** (with the optional menu entry), or restart CLO (`restart_clo` does it
+  for you, saving and reopening the scene).
 - **`uvx` is not recognised:** open a new terminal after installing uv, or restart your MCP
   client so it picks up the new PATH.
 - **Rebuilding fails with `LNK1104: cannot open file ...CloMcpPlugin.dll`:** CLO has the DLL
   loaded. Close CLO, or rename the loaded DLL (Windows allows renaming a file that's in use) and
   rebuild. CLO keeps using the old copy until it restarts. With autostart, run
-  `install_autostart.bat` again after rebuilding, with CLO closed.
+  `install_autostart.bat` again after rebuilding, with CLO closed, or ask the assistant to
+  `restart_clo` with `install_plugin` set to `cpp_plugin\dist\CloMcpPlugin.dll`.
 - **CLO crashes when adding the plug-in, or calls do odd things:** the SDK doesn't match your CLO
   version.
 

@@ -19,6 +19,7 @@ MAX_BUSY = 3600  # seconds to keep waiting while CLO reports it is still running
 POLL_INTERVAL = 0.05  # seconds between file checks
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0
+DIALOG_CHECK = 1.0  # seconds between checks for a CLO dialog while waiting for a reply
 
 
 class CLO3DConnectionError(Exception):
@@ -35,6 +36,17 @@ class CLO3DCommandError(CLO3DConnectionError):
 
 class CLO3DTimeoutError(CLO3DConnectionError):
     """No reply in time. The command may still run or have run, so it is never re-sent."""
+
+
+class CLO3DDialogError(CLO3DConnectionError):
+    """CLO opened a dialog that needs a decision; the command waits inside CLO until it is
+    answered (answer_dialog), which then returns the command's reply."""
+
+    def __init__(self, dialog):
+        self.dialog = dialog
+        super().__init__("CLO is waiting on a dialog: %r %r, buttons %s. The command is paused inside CLO "
+                         "until a button is clicked (answer_clo_dialog)."
+                         % (dialog.get("title"), dialog.get("message"), dialog.get("buttons")))
 
 
 def _find_comm_dir():
@@ -97,6 +109,7 @@ class CLO3DConnection:
         self.comm_dir = comm_dir or _find_comm_dir()
         self.request_file = os.path.join(self.comm_dir, "request.json")
         self.response_file = os.path.join(self.comm_dir, "response.json")
+        self.pending = None      # a request paused on a dialog: (request, answers)
         self._initialized = True
 
     @property
@@ -116,11 +129,12 @@ class CLO3DConnection:
         """No-op for file-based connection (kept for API compatibility)."""
         pass
 
-    def send_command(self, command_type, params=None, retries=MAX_RETRIES):
+    def send_command(self, command_type, params=None, retries=MAX_RETRIES, answers=None):
         """
         Send a command to CLO3D and return the result.
 
-        Writes request.json, waits for response.json, returns the parsed result.
+        Writes request.json, waits for response.json, returns the parsed result. answers maps
+        text found in a dialog's title or message to the button to click if CLO asks during this command.
         """
         request = {
             "id": str(uuid.uuid4()),
@@ -132,7 +146,7 @@ class CLO3DConnection:
         # could run a command twice (e.g. a second simulation after a slow first one).
         for attempt in range(retries):
             try:
-                return self._do_send(request)
+                return self._do_send(request, answers)
             except CLO3DNotRunningError:
                 if attempt < retries - 1:
                     time.sleep(RETRY_DELAY)
@@ -148,7 +162,55 @@ class CLO3DConnection:
             return False
         return status.get("state") == "busy" and status.get("request_id") == request_id
 
-    def _do_send(self, request):
+    def _clo_pid(self):
+        try:
+            with open(os.path.join(self.comm_dir, "status.json"), "r") as f:
+                return json.load(f).get("pid")
+        except (OSError, ValueError):
+            return None
+
+    def _handle_dialog(self, request, answers, seen):
+        """Answer a dialog CLO opened during this request, or raise CLO3DDialogError."""
+        from clo3d_mcp import clo_ui
+        hwnd = clo_ui.find_dialog(self._clo_pid())
+        if not hwnd:
+            return
+        info = clo_ui.read_dialog(hwnd)
+        if not info.get("buttons"):
+            return   # still being built, or a transient window: look again on the next check
+        choice = None
+        shown = ((info.get("title") or "") + " " + (info.get("message") or "")).lower()
+        for text, button in (answers or {}).items():
+            if text.lower() in shown and button in info.get("buttons", []):
+                choice = button
+                break
+        choice = choice or clo_ui.default_answer(info)
+        if not choice:
+            self.pending = (request, answers, seen)
+            raise CLO3DDialogError(info)
+        info["clicked"] = choice if clo_ui.click_dialog(hwnd, choice) else None
+        seen.append(info)
+
+    def answer_dialog(self, button):
+        """Click a button on CLO's open dialog; if a command was paused on it, wait for its reply."""
+        from clo3d_mcp import clo_ui
+        hwnd = clo_ui.find_dialog(self._clo_pid())
+        if not hwnd:
+            raise CLO3DConnectionError("CLO has no dialog open")
+        info = clo_ui.read_dialog(hwnd)
+        if button not in info.get("buttons", []):
+            raise CLO3DConnectionError("the dialog has no %r button; it has %s" % (button, info.get("buttons")))
+        if not clo_ui.click_dialog(hwnd, button):
+            raise CLO3DConnectionError("clicking %r failed" % button)
+        info["clicked"] = button
+        if not self.pending:
+            return {"dialog": info}
+        request, answers, seen = self.pending
+        self.pending = None
+        seen.append(info)
+        return self._wait(request, answers, seen)
+
+    def _do_send(self, request, answers=None):
         """Write request, poll for response, return result."""
         # Ensure comm dir exists
         if not os.path.isdir(self.comm_dir):
@@ -174,10 +236,17 @@ class CLO3DConnection:
         if os.path.exists(self.request_file):
             os.remove(self.request_file)
         os.rename(tmp_file, self.request_file)
+        self.pending = None
+        return self._wait(request, answers, [])
 
-        # Poll for response
+    def _wait(self, request, answers, seen):
+        """Poll for the reply to request, answering CLO dialogs on the way."""
         start_time = time.time()
+        next_check = start_time + DIALOG_CHECK
         while True:
+            if time.time() > next_check:
+                self._handle_dialog(request, answers, seen)
+                next_check = time.time() + DIALOG_CHECK
             elapsed = time.time() - start_time
             # The plug-in writes the reply before clearing "busy", so check for a reply first.
             if elapsed > TIMEOUT and not os.path.exists(self.response_file):
@@ -216,7 +285,15 @@ class CLO3DConnection:
                         error_msg = response.get("message", "Unknown error from CLO3D")
                         raise CLO3DCommandError("CLO3D error: " + error_msg)
 
-                    return response.get("result", {})
+                    result = response.get("result", {})
+                    if seen:
+                        from clo3d_mcp import clo_ui
+                        failed = [d for d in seen if clo_ui.is_failure(d)]
+                        if failed:   # CLO's API often reports success while its dialog says it failed
+                            raise CLO3DCommandError("CLO3D error (from its dialog): " + failed[0].get("message", ""))
+                        if isinstance(result, dict):
+                            result["clo_dialogs"] = seen
+                    return result
 
                 except (json.JSONDecodeError, ValueError):
                     # File might be partially written, wait and retry

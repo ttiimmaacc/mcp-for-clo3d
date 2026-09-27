@@ -27,10 +27,31 @@ mcp = FastMCP(
 )
 
 
-def _send(command: str, params: dict | None = None) -> dict:
-    """Send a command to CLO3D and return the result."""
+def _send(command: str, params: dict | None = None, answers: dict | None = None) -> dict:
+    """Send a command to CLO3D and return the result. answers: {text in a dialog's title or message:
+    button} for dialogs CLO may open during the command (acknowledge-only dialogs are answered
+    anyway, and reported in the result's clo_dialogs)."""
     conn = get_connection()
-    return conn.send_command(command, params)
+    return conn.send_command(command, params, answers=answers)
+
+
+# CLO's prompt when the open scene would be replaced
+UNSAVED = "File not saved"
+# CLO's prompt after it was ended without saving (restart_clo)
+AUTOSAVE = "Autosave file exists"
+
+
+def _unsaved_answers(discard_unsaved: bool) -> dict:
+    # "Open Project" is CLO's options dialog (load objects / environment) when opening a .zprj
+    return {UNSAVED: "No" if discard_unsaved else "Cancel", "Open Project": "OK"}
+
+
+def _check_not_cancelled(result: dict, command: str) -> dict:
+    for dialog in result.get("clo_dialogs", []) if isinstance(result, dict) else []:
+        if UNSAVED.lower() in (dialog.get("message") or "").lower() and dialog.get("clicked") == "Cancel":
+            raise ValueError("%s cancelled: the scene has unsaved changes. Save them with save_project, "
+                             "or pass discard_unsaved=True to drop them." % command)
+    return result
 
 
 def _given(**params) -> dict:
@@ -469,6 +490,10 @@ def restore_checkpoint(name: str) -> dict:
     Afterwards CLO's open file is the checkpoint copy; save with save_project to the
     original_path returned here to keep working on the real file.
     """
+    return _restore(name)
+
+
+def _restore(name: str, answers: dict | None = None) -> dict:
     path = _checkpoint_path(name)
     if not os.path.exists(path):
         raise ValueError("no checkpoint named %r; see list_checkpoints" % name)
@@ -477,7 +502,7 @@ def restore_checkpoint(name: str) -> dict:
     if os.path.exists(meta_file):
         with open(meta_file, encoding="utf-8") as f:
             meta = json.load(f)
-    result = _send("open_file", {"file_path": path})
+    result = _send("open_file", {"file_path": path}, answers={**_unsaved_answers(True), **(answers or {})})
     return {"restored": result.get("opened", False), "checkpoint": name,
             "original_path": meta.get("original_path"), "project": _send("get_project_info")}
 
@@ -492,19 +517,25 @@ def get_project_info() -> dict:
 
 
 @mcp.tool()
-def new_project() -> dict:
-    """Create a new empty CLO3D project, clearing the current scene."""
-    return _send("new_project")
+def new_project(discard_unsaved: bool = False) -> dict:
+    """Create a new empty CLO3D project, clearing the current scene.
+
+    Args:
+        discard_unsaved: Drop unsaved changes when CLO asks; otherwise it stops with an error.
+    """
+    return _check_not_cancelled(_send("new_project", answers=_unsaved_answers(discard_unsaved)), "new_project")
 
 
 @mcp.tool()
-def open_file(file_path: str) -> dict:
+def open_file(file_path: str, discard_unsaved: bool = False) -> dict:
     """Open a file in CLO3D. Supports .zprj, .zpac, .avt, .obj, .fbx formats.
 
     Args:
         file_path: Absolute path to the file to open.
+        discard_unsaved: Drop unsaved changes when CLO asks; otherwise it stops with an error.
     """
-    return _send("open_file", {"file_path": file_path})
+    return _check_not_cancelled(_send("open_file", {"file_path": file_path},
+                                      answers=_unsaved_answers(discard_unsaved)), "open_file")
 
 
 @mcp.tool()
@@ -1207,6 +1238,148 @@ def clo_ui_nest_all_fabrics() -> dict:
     nest_all_fabrics()
     time.sleep(2.0)
     return _markers()
+
+
+# ─── CLO's Dialogs & Restart ───────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_clo_dialog() -> dict:
+    """The dialog open in CLO right now, if any: title, message and buttons. Commands answer
+    CLO's acknowledge-only dialogs (OK / Close) themselves and list them in clo_dialogs; a dialog
+    that needs a decision stops the command with its text and buttons instead of hanging."""
+    from clo3d_mcp import clo_ui
+    conn = get_connection()
+    hwnd = clo_ui.find_dialog(conn._clo_pid())
+    if not hwnd:
+        return {"open": False}
+    return {"open": True, "command_waiting": bool(conn.pending), **clo_ui.read_dialog(hwnd)}
+
+
+@mcp.tool()
+def answer_clo_dialog(button: str) -> dict:
+    """Click a button on the dialog open in CLO (see get_clo_dialog). If a command was stopped by
+    the dialog, it carries on inside CLO and its result is returned here. Decisions that lose
+    work (e.g. "No" to saving changes) are the user's to make."""
+    return get_connection().answer_dialog(button)
+
+
+def _wait_for_listener(pid: int, timeout_s: float) -> dict:
+    """Wait for the plug-in in CLO process pid, answering acknowledge-only startup dialogs."""
+    from clo3d_mcp import clo_ui
+    conn = get_connection()
+    status_file = os.path.join(conn.comm_dir, "status.json")
+    seen = []
+    end = time.time() + timeout_s
+    while time.time() < end:
+        try:
+            with open(status_file, encoding="utf-8") as f:
+                status = json.load(f)
+        except (OSError, ValueError):
+            status = {}
+        if status.get("pid") == pid and status.get("state") == "listening":
+            return {"ready": True, "startup_dialogs": seen}
+        hwnd = clo_ui.find_dialog(pid)
+        if hwnd:
+            info = clo_ui.read_dialog(hwnd)
+            choice = clo_ui.default_answer(info)
+            if not choice:
+                return {"ready": False, "dialog": info,
+                        "note": "CLO is waiting on this dialog at startup; answer it with answer_clo_dialog "
+                                "or in CLO, then check get_project_info"}
+            info["clicked"] = choice if clo_ui.click_dialog(hwnd, choice) else None
+            seen.append(info)
+        time.sleep(1.0)
+    return {"ready": False, "startup_dialogs": seen,
+            "note": "the MCP listener did not start within %.0f s (is CLO asking to sign in?)" % timeout_s}
+
+
+def _answer_for(pid: int, answers: dict, seconds: float) -> list:
+    """Watch CLO for a while and answer the dialogs named in answers (text in title or message)."""
+    from clo3d_mcp import clo_ui
+    seen = []
+    end = time.time() + seconds
+    while time.time() < end:
+        hwnd = clo_ui.find_dialog(pid)
+        if hwnd:
+            info = clo_ui.read_dialog(hwnd)
+            shown = ((info.get("title") or "") + " " + (info.get("message") or "")).lower()
+            button = next((b for text, b in answers.items() if text.lower() in shown and b in info.get("buttons", [])), None)
+            if button:
+                info["clicked"] = button if clo_ui.click_dialog(hwnd, button) else None
+                seen.append(info)
+                continue
+        time.sleep(1.0)
+    return seen
+
+
+@mcp.tool()
+def restart_clo(save_first: bool = True, reopen: bool = True, install_plugin: str = "",
+                discard_unsaved: bool = False, timeout_s: float = 300.0) -> dict:
+    """Close CLO and start it again, e.g. to load a rebuilt plug-in or recover from a hang.
+
+    The scene is saved first as the checkpoint "before_restart" and reopened afterwards. CLO is
+    then ended without its own save prompt. If the scene cannot be saved (CLO not answering),
+    nothing is closed unless discard_unsaved=True.
+
+    Args:
+        save_first: Save the scene as checkpoint "before_restart" first.
+        reopen: Reopen that checkpoint once CLO is back.
+        install_plugin: Path of a plug-in DLL to install while CLO is closed (e.g.
+            cpp_plugin/dist/CloMcpPlugin.dll); CLO only loads plug-ins at startup.
+        discard_unsaved: Close even when the scene could not be saved.
+        timeout_s: How long to wait for CLO and the plug-in to come back.
+    """
+    from clo3d_mcp import clo_ui
+    import shutil
+    if install_plugin and not os.path.isfile(install_plugin):
+        raise ValueError("no plug-in DLL at %s" % install_plugin)
+    pid, exe = clo_ui.clo_process()
+    out = {}
+    saved = False
+    if pid and save_first:
+        try:
+            saved = bool(save_checkpoint("before_restart").get("saved"))
+        except Exception as error:   # noqa: BLE001 - reported below
+            out["save_error"] = str(error)
+        if not saved and not discard_unsaved:
+            raise RuntimeError("could not save the scene before restarting (%s); nothing was closed. "
+                               "Pass discard_unsaved=True to restart anyway." % out.get("save_error", "not saved"))
+    if pid:
+        if not clo_ui.kill(pid):
+            raise RuntimeError("CLO (pid %d) did not close" % pid)
+        out["closed_pid"] = pid
+    if install_plugin:
+        shutil.copyfile(install_plugin, clo_ui.PLUGIN_PATH)
+        out["plugin_installed"] = clo_ui.PLUGIN_PATH
+    exe = exe or clo_ui.DEFAULT_EXE
+    if not os.path.isfile(exe):
+        raise RuntimeError("CLO's program was not found at %s" % exe)
+    clo_ui.start(exe)
+    new_pid = None
+    end = time.time() + 60
+    while time.time() < end and not new_pid:
+        time.sleep(2.0)
+        new_pid = clo_ui.clo_process()[0]
+    if not new_pid:
+        raise RuntimeError("CLO did not start (%s)" % exe)
+    out["pid"] = new_pid
+    out.update(_wait_for_listener(new_pid, timeout_s))
+    if out.get("ready") and reopen and saved:
+        # the listener starts before CLO has finished starting up, and CLO turns down an open
+        # until then (tested: the first open right after the restart returned opened=False)
+        for _ in range(6):
+            time.sleep(5.0)
+            # CLO was ended without saving, so it offers its autosave; the checkpoint is newer
+            if _restore("before_restart", {AUTOSAVE: "No"}).get("restored"):
+                out["reopened"] = True
+                # CLO offers its autosave (it was ended without saving) a few seconds after the
+                # project has opened, outside the open command; the checkpoint is newer
+                out["later_dialogs"] = _answer_for(new_pid, {AUTOSAVE: "No"}, 20.0)
+                break
+        else:
+            out["reopened"] = False
+    return out
 
 
 @mcp.tool()
