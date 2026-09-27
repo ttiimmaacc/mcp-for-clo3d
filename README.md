@@ -116,6 +116,11 @@ reports back. Some examples:
   hem and a star appliqué on front and back, hanging from a 32 mm rod."*
   ([`examples/noren_curtain.py`](examples/noren_curtain.py) is this build as a script.)
 - *"Topstitch every appliqué patch 4 mm in from its edge with 0.4 mm thread."*
+- *"Build a boxy reversible wool jacket, size M: shoulders 80 cm, chest 54 cm, back 64 cm, sleeves
+  76 cm from the collar, grey plaid outside and plain charcoal inside, overlocked edges and a split
+  kangaroo pocket."* ([`examples/workwear_jacket.py`](examples/workwear_jacket.py) is this build as a
+  script. The dropped shoulders still need a nudge with CLO's Move tool before draping, since the API
+  has no free 3D move.)
 
 **Fabrics and presentation**
 - *"What fabrics does this project use, and what are their weights and thicknesses? Label them
@@ -162,19 +167,19 @@ Needed for any CLO version other than the one the release was built for.
 | Hems & appliqué | `add_hem`: the turned-back layer of a hem as a strip on the reverse, sewn at the edge and the hem line (cloth cannot be folded this way: a fold angle only bends it about 20° even at full strength, however it is set). `add_applique`: a patch sewn where it sits, optionally with its reverse copy |
 | Plotting & PDF | `export_pattern_sheet` (vector PDF at exactly 1:1, or PNG; pattern window or print layout; seam allowance, notches, grain lines, names, annotations...), `nest_patterns` and `marker_report` (marker length, width, utilisation per fabric, measured from the 1:1 layout), `set_fabric_width`, `set_nesting` (spacing, 1/2/4-way grain, fixed pieces), `add_pattern_annotation`, `get_pattern_annotations`, `get_print_options`. CLO's print layout exports one fabric at a time, and in a fresh CLO session the API's nesting only works after Printing Layout mode has been opened once; `clo_ui_nest_all_fabrics` / `nest_patterns(allow_ui_click=True)` click CLO's "Nest All Fabrics" through Windows UI Automation as a fallback |
 | CAD / DXF | `export_dxf`: AAMA, ASTM or Gerber DXF without a dialog, read back as a check (piece names, sizes, quantities, outline boxes) |
-| Topstitch styles | `create_topstitch_style` (stitch length, thread thickness, offset: CLO's API cannot set these, so a style saved from CLO once is copied with the values changed and imported), `get_topstitch_style`, `set_topstitch_style` (name, colour, lines) |
+| Topstitch styles | `create_topstitch_style` (stitch length, thread thickness, offset: CLO's API cannot set these, so a style saved from CLO once is copied with the values changed and imported; save several as named templates, e.g. an overlock), `get_topstitch_style`, `set_topstitch_style` (name, colour, lines) |
 | Fabric details | `get_fabric_info`, `set_fabric_information` (name, content such as 60% cotton / 40% linen), `set_fabric_physics` (weight, thickness, stretch, shear, bending...; keeps colour, texture and name), `export_fabric` (.zfab), `apply_fabric_json` |
 | Hanging on a rod | `hang_on_rod`: sews a header band to each panel's top edge, freezes it and lays a rod along it, so curtains, noren and banners hang reliably (the band stands in for the pocket; the rod lies against it). `make_rod_pocket`: a real folded pocket around the rod. Verified with a single 1000 × 1500 mm panel; with several panels it often fails to wrap |
 | Checkpoints | `save_checkpoint`, `list_checkpoints`, `restore_checkpoint`: CLO's API has no undo, so save the scene before risky edits and reopen it if something goes wrong |
 | Geometry | `get_pattern_geometry`: pieces with numbered outline lines (length, endpoints), internal shapes, and every seam mapped to the lines it uses |
 | Patterns | `get_pattern_count`, `get_pattern_list`, `get_pattern_info`, `get_pattern_bounding_box`, `set_pattern_name`, `copy_pattern`, `delete_pattern`, `flip_pattern`, `create_pattern`, `mirror_pattern`, `unfold_pattern`, `move_pattern_2d` |
-| Sewing | `sew_lines` (outline or internal-shape lines), `add_topstitch`, `list_topstitch_styles`, `set_seam_taping` |
+| Sewing | `sew_edges` (two edges given by their end points, sewn in the direction given, so seams never twist), `sew_lines` (outline or internal-shape lines), `add_topstitch`, `topstitch_all` (every seam and/or free edge), `list_topstitch_styles`, `set_seam_taping` |
 | Lines and shapes | `add_internal_shape`, `offset_internal_line`, `convert_shape` (internal ↔ base line), `delete_point`, `delete_line` |
 | Piece state | `set_pattern_state` (freeze, strengthen, solidify, hide in 3D, layer, particle distance, grain), `get_pattern_state`, `remove_all_pins` |
 | Elastic and shrinkage | `set_elastic` (on/off, strength, ratio, segment and total length), `set_shrinkage` |
 | 3D placement | `get_arrangement_points`, `place_pattern` (arrangement point, orientation, position, Flat/Curved), `reset_arrangement`, `get_arrangement_list` |
-| Fabrics | `get_fabric_list`, `add_fabric`, `replace_fabric`, `assign_fabric_to_pattern`, `set_fabric_color`, `get_fabric_for_pattern`, `delete_fabric` |
-| Avatar | `get_avatars`, `import_avatar`, `show_avatar` |
+| Fabrics | `get_fabric_list`, `add_fabric`, `replace_fabric`, `assign_fabric_to_pattern`, `set_fabric_color` (front or back face), `get_fabric_for_pattern`, `delete_fabric`, `set_fabric_texture`, `set_fabric_faces` (a separate back face, e.g. double-faced cloth), `apply_plaid` (a woven plaid or tartan from its thread count, at its real repeat size, optionally with a plain back) |
+| Avatar & pose | `get_avatars`, `import_avatar`, `show_avatar`, `load_pose` (a .pos file: pose only or with its position, feet to the ground), `save_pose`. CLO's API cannot bend joints, so pose the avatar in CLO once, save the pose, and load it from scripts |
 | Export | `export_obj`, `export_fbx`, `export_glb`, `export_gltf`, `export_thumbnail`, `export_snapshot`, `export_turntable`, `export_tech_pack` |
 | Simulation | `simulate`, `set_simulation_quality` |
 | Colorways | `get_colorways`, `set_current_colorway` |

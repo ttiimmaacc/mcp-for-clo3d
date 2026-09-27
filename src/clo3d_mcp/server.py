@@ -1859,6 +1859,30 @@ def import_avatar(file_path: str, apf_path: str = "") -> dict:
 
 
 @mcp.tool()
+def load_pose(file_path: str, pose_and_translation: bool = False, bottom_to_ground: bool = True) -> dict:
+    """Pose the avatar from a .pos file (made and saved in CLO, or with save_pose). CLO's API
+    cannot bend joints itself, so poses are built in CLO's pose tools and reused from files.
+    Load the pose before placing garment pieces: arrangement points follow the avatar.
+
+    Args:
+        file_path: The .pos file.
+        pose_and_translation: Also apply the pose's position in the scene (default: pose only).
+        bottom_to_ground: Stand the avatar's feet on the ground afterwards.
+    """
+    if not os.path.isfile(file_path):
+        raise ValueError("no pose file at %s" % file_path)
+    return _send("load_pose", {"file_path": file_path, "pose_and_translation": pose_and_translation,
+                               "bottom_to_ground": bottom_to_ground})
+
+
+@mcp.tool()
+def save_pose(file_path: str = "") -> dict:
+    """Save the avatar's current pose as a .pos file, for load_pose later (e.g. after posing
+    it in CLO). Without a path CLO writes it to its temporary folder; the path is returned."""
+    return _send("save_pose", {"file_path": file_path} if file_path else {})
+
+
+@mcp.tool()
 def show_avatar(show: bool = True) -> dict:
     """Show or hide the avatar."""
     return _send("show_hide_avatar", {"show": show})

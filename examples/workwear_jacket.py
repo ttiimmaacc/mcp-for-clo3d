@@ -142,7 +142,7 @@ if __name__ == "__main__":
     if not s.get_avatars()["count"]:
         s.import_avatar(AVATAR)
     if os.path.exists(POSE):   # a natural standing pose instead of CLO's A-pose
-        s.import_file(POSE)
+        s.load_pose(POSE)
     points_by_name = s.get_arrangement_points()["arrangement_points"]
     if "--pocket-only" in sys.argv:
         names = {p["name"]: p["pattern_index"] for p in summarize(s._send("get_pattern_geometry"))["pieces"]}

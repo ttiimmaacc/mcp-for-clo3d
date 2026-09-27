@@ -652,6 +652,21 @@ std::map<std::string, Handler> BuildHandlers()
 		bool ok = ext == ".avac" ? IMPORT_API->ImportAVAC(path, p.str("apf_path", "")) : IMPORT_API->ImportFile(path);
 		return Value::object().set("imported", ok).set("file_path", path).set("avatar_count", EXPORT_API->GetAvatarCount());
 	};
+	// the API cannot bend joints; poses are made in CLO and saved/loaded as .pos files
+	h["load_pose"] = [](const Value& p) {
+		std::string path = p.str("file_path");
+		if (!EXPORT_API->GetAvatarCount())
+			throw std::runtime_error("no avatar in the scene; load one first");
+		bool translation = p.boolean("pose_and_translation", false), ground = p.boolean("bottom_to_ground", true);
+		bool ok = IMPORT_API->ImportPose(path, translation, ground);
+		return Value::object().set("loaded", ok).set("file_path", path)
+			.set("pose_and_translation", translation).set("bottom_to_ground", ground);
+	};
+	h["save_pose"] = [](const Value& p) {
+		std::string path = p.str("file_path", "");
+		std::string written = path.empty() ? EXPORT_API->ExportPose() : EXPORT_API->ExportPose(path);
+		return Value::object().set("saved", !written.empty()).set("file_path", written);
+	};
 
 	// -- Collision objects --
 	// ImportOBJ with explicit options never shows the import dialog. As an avatar (type 0) the
