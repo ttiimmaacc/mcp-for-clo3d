@@ -12,7 +12,8 @@ drawing, and on the back (seen from behind) it is on the right: a front's seams 
 mirrored side of the back (sewing them to the same x crosses the garment through itself).
 
 Run with CLO open and the MCP listener running:
-    uv run python examples/workwear_jacket.py [--reset]
+    uv run python examples/workwear_jacket.py [--reset] [--no-simulate] [--no-pocket]
+    uv run python examples/workwear_jacket.py --pocket-only   # add the pocket to the draped jacket in CLO
 """
 
 import math
@@ -54,7 +55,9 @@ NECK_Y = LENGTH + 20.0       # height of the neck point (shoulder rises to it)
 SLIT = 100.0                 # side slits above the hem
 # kangaroo pocket half, in front coordinates (x outwards from centre front, y up from the hem)
 POCKET_BOTTOM, POCKET_TOP, POCKET_SLANT_Y = 60.0, 300.0, 170.0
-POCKET_CF = 18.0             # the halves stop just short of the front edges
+POCKET_CF = 30.0             # inner edges 3 cm from centre front, clear of the 2.5 cm closure overlap
+                             # (reaching into it, one half was trapped under the other front and puffed)
+POCKET_OFFSET = 70           # placed 70 mm off the body; the fronts sit at CLO's default 50
 POCKET_OUT, POCKET_TOP_OUT = 230.0, 120.0
 SHOULDER_LINE = math.hypot(HALF_SHOULDER - NECK_HALF, NECK_Y - SHOULDER_Y)
 SLEEVE = SLEEVE_FROM_COLLAR - SHOULDER_LINE   # dropped shoulder seam to the cuff edge
@@ -85,6 +88,51 @@ def arrangement(name):
     raise ValueError("no arrangement point %s" % name)
 
 
+def stitch_style():
+    """The overlock edge style: made from the saved template, or the one already in the project."""
+    for style in s.list_topstitch_styles()["styles"]:
+        if style["TopstitchStyleName"] == "Overlock edge":
+            return int(style["TopstitchStyleIndex"])
+    # overlock shape and grey thread come from a style saved from CLO (Shape: Overlock); pass it
+    # once as template_path, later runs reuse the stored "overlock" template
+    saved = os.path.join(os.path.dirname(__file__), "..", "overlock.sst")
+    return s.create_topstitch_style("Overlock edge", thread_thickness_mm=1.0, stitch_length_mm=2.0, offset_mm=1.5,
+                                    template="overlock",
+                                    template_path=saved if os.path.exists(saved) else None)["style_index"]
+
+
+def add_pockets(fabric, fronts):
+    """Split kangaroo pocket on the draped jacket: one half on each front, either side of the
+    closure, sewn at the top, outer side, bottom and inner edge; the slanted side is the opening.
+
+    Staged, as in CLO by hand: added after the jacket has draped (sewn into an undraped jacket
+    the pocket seams haul the front hem up), placed on the front's own arrangement surface
+    further out than the front (from the lower Body_Front_4 point they started inside the front
+    and crumpled on the way out), then draped with everything else frozen and a last settle."""
+    pockets = []
+    for (front, sign, point) in ((fronts[0], -1, "Body_Front_3_R"), (fronts[1], 1, "Body_Front_3_L")):
+        x = lambda v: sign * v
+        half = [[x(POCKET_OUT), POCKET_SLANT_Y], [x(POCKET_OUT), POCKET_BOTTOM], [x(POCKET_CF), POCKET_BOTTOM],
+                [x(POCKET_CF), POCKET_TOP], [x(POCKET_TOP_OUT), POCKET_TOP]]
+        made = s.add_applique(front, half, sewn_lines=4, layer=1, fabric_index=fabric,
+                              name="Pocket %s" % ("right" if sign < 0 else "left"), place_flat=False)
+        pocket = made["patches"][0]["pattern_index"]
+        s.place_pattern(pocket, arrangement_index=arrangement(point), position_x=60, position_y=55,
+                        offset=POCKET_OFFSET)
+        pockets.append(pocket)
+    others = [i for i in range(s.get_pattern_count()["count"]) if i not in pockets]
+    for i in others:
+        s.set_pattern_state(i, frozen=True)
+    for _ in range(3):
+        s.simulate(50)
+    for i in others:
+        s.set_pattern_state(i, frozen=False)
+    s.simulate(100)
+    s.topstitch_all(stitch_style(), pattern_indices=pockets)
+    step("kangaroo pocket: two halves, slanted openings, draped onto the fronts")
+    return pockets
+
+
 if __name__ == "__main__":
     t0 = time.time()
     if "--reset" in sys.argv:
@@ -96,6 +144,13 @@ if __name__ == "__main__":
     if os.path.exists(POSE):   # a natural standing pose instead of CLO's A-pose
         s.import_file(POSE)
     points_by_name = s.get_arrangement_points()["arrangement_points"]
+    if "--pocket-only" in sys.argv:
+        names = {p["name"]: p["pattern_index"] for p in summarize(s._send("get_pattern_geometry"))["pieces"]}
+        if "Pocket right" in names:
+            sys.exit("the jacket already has its pocket")
+        fronts = (names["Front right"], names["Front left"])
+        add_pockets(s.get_fabric_for_pattern(fronts[0])["fabric_index"], fronts)
+        sys.exit(0)
     fabric = s.add_fabric(WOOL)["fabric_index"]
     s.set_fabric_information(fabric, {"Content": "100% Wool, double-faced"}, name="Double-faced wool")
     # double-faced: grey/black plaid outside, plain charcoal inside
@@ -209,25 +264,9 @@ if __name__ == "__main__":
             s.place_pattern(p, arrangement_index=arrangement(name))
     step("placed on the avatar")
 
-    # --- split kangaroo pocket: one half on each front, meeting at centre front; sewn at the
-    #     top, outer side, bottom and centre front, the slanted side left open as the opening ---
-    for front, sign, point in ((front_r, -1, "Body_Front_4_R"), (front_l, 1, "Body_Front_4_L"))             if "--no-pocket" not in sys.argv else ():
-        x = lambda v: sign * v
-        half = [[x(POCKET_OUT), POCKET_SLANT_Y], [x(POCKET_OUT), POCKET_BOTTOM], [x(-POCKET_CF), POCKET_BOTTOM],
-                [x(-POCKET_CF), POCKET_TOP], [x(POCKET_TOP_OUT), POCKET_TOP]]
-        made = s.add_applique(front, half, sewn_lines=4, layer=1, fabric_index=fabric,
-                              name="Pocket %s" % ("right" if sign < 0 else "left"), place_flat=False)
-        s.place_pattern(made["patches"][0]["pattern_index"], arrangement_index=arrangement(point))
-    step("kangaroo pocket: two halves, slanted openings")
 
     # --- contrast edge stitching on every seam and raw edge, as on the reversible original ---
-    # overlock shape and grey thread come from a style saved from CLO (Shape: Overlock); pass it
-    # once as template_path, later runs reuse the stored "overlock" template
-    saved = os.path.join(os.path.dirname(__file__), "..", "overlock.sst")
-    style = s.create_topstitch_style("Overlock edge", thread_thickness_mm=1.0, stitch_length_mm=2.0, offset_mm=1.5,
-                                     template="overlock",
-                                     template_path=saved if os.path.exists(saved) else None)
-    done = s.topstitch_all(style["style_index"])
+    done = s.topstitch_all(stitch_style())
     step("contrast stitching: %d seams, %d edges%s" % (done["seams"], done["edges"],
                                                          ", failed %s" % done["failed"] if done["failed"] else ""))
     s.save_checkpoint("jacket_arranged")
@@ -235,11 +274,14 @@ if __name__ == "__main__":
         # stop before draping, e.g. to nudge the back body and back sleeve panels up at the shoulder
         # seam with CLO's Move tool (the API cannot move pieces freely), then simulate in CLO or run
         # `uv run python -c "import clo3d_mcp.server as s; s.simulate(300)"`
-        step("placed and sewn, not simulated (--no-simulate)")
+        step("placed and sewn, not simulated (--no-simulate); after draping it, add the pocket with --pocket-only")
         sys.exit(0)
     for _ in range(6):
         s.simulate(50)
-    step("simulated; done in %.0f s" % (time.time() - t0))
+    step("jacket simulated")
+    if "--no-pocket" not in sys.argv:
+        add_pockets(fabric, (front_r, front_l))
+    step("done in %.0f s" % (time.time() - t0))
     # Known limit: CLO's API only places pieces on arrangement points (no free 3D move), and the
     # arm can end up caught between the back and the back sleeve panels, through the armhole seam
     # at the back of the upper arm. Tested without success: other points, positions, a larger
